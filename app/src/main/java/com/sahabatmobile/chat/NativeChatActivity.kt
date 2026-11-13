@@ -108,7 +108,7 @@ class NativeChatActivity : AppCompatActivity() {
         ),
         "asian_starter" to listOf("deepseek/deepseek-flash"),
         "asian_coder" to listOf("hy4-preview", "glm-5.3"),
-        "longcat" to listOf("LongCat-2.5-Preview", "LongCat-2.0")
+        "longcat" to listOf("LongCat-2.5", "LongCat-2.5-Preview", "LongCat-2.0")
     )
 
     private val PACKAGE_NAMES: Map<String, String> = mapOf(

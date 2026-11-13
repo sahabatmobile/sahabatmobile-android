@@ -1,0 +1,2 @@
+-keepattributes JavascriptInterface
+-dontwarn org.json.**

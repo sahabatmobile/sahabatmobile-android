@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.SahabatMobile" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/primaryTint</item>
+        <item name="colorOnPrimaryContainer">@color/primaryDeep</item>
+        <item name="colorSecondary">@color/gold</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/textPrimary</item>
+        <item name="colorSurfaceVariant">@color/surfaceMuted</item>
+        <item name="colorOnSurfaceVariant">@color/textSecondary</item>
+        <item name="colorOutline">@color/stroke</item>
+        <item name="colorOutlineVariant">@color/strokeSoft</item>
+        <item name="colorError">@color/errorText</item>
+
+        <item name="android:colorBackground">@color/bgLight</item>
+        <item name="android:windowBackground">@color/bgLight</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/bgLight</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+
+        <item name="shapeAppearanceCornerMedium">@style/ShapeAppearance.Sahabat.Medium</item>
+        <item name="shapeAppearanceCornerLarge">@style/ShapeAppearance.Sahabat.Large</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Sahabat.Dialog</item>
+    </style>
+
+</resources>

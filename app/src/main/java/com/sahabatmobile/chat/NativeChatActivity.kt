@@ -1566,7 +1566,13 @@ class NativeChatActivity : AppCompatActivity() {
             try {
                 val msgs = JSONArray()
                 val ass = assistant.optString("prompt")
-                if (ass.isNotEmpty()) msgs.put(JSONObject().put("role", "system").put("content", ass))
+                var systemText = ass
+                val webSearchInstruction = "Jika pertanyaan memerlukan info terbaru, berita, atau data terkini, gunakan pencarian web sebelum menjawab."
+                if (systemText.isEmpty()) systemText = webSearchInstruction
+                if (systemText.isNotEmpty() && !systemText.contains("pencarian web", ignoreCase = true)) {
+                    systemText = systemText + "\n\n" + webSearchInstruction
+                }
+                if (systemText.isNotEmpty()) msgs.put(JSONObject().put("role", "system").put("content", systemText))
                 for (i in 0 until history.length()) {
                     val m = history.getJSONObject(i)
                     val imgPath = m.optString("image")
@@ -1594,47 +1600,101 @@ class NativeChatActivity : AppCompatActivity() {
                     msgs.put(JSONObject().put("role", m.optString("role")).put("content", m.optString("content")))
                 }
 
-                val payload = JSONObject()
+                val webSearchParams = JSONObject()
+                    .put("type", "object")
+                    .put("properties", JSONObject().put("query", JSONObject().put("type", "string").put("description", "Kata kunci pencarian berita/informasi terbaru.")))
+                    .put("required", JSONArray().put("query"))
+                val webTools = JSONObject()
+                    .put("type", "function")
+                    .put("function", JSONObject()
+                        .put("name", "web_search")
+                        .put("description", "Mencari informasi terbaru dari internet berdasarkan kata kunci yang diberikan.")
+                        .put("parameters", webSearchParams))
+                var payload = JSONObject()
                     .put("model", model)
                     .put("messages", msgs)
                     .put("stream", true)
+                    .put("tools", webTools)
+                    .put("tool_choice", "auto")
 
-                val conn = URL("$API_BASE/chat/completions").openConnection() as HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.doOutput = true
-                conn.connectTimeout = 20000
-                conn.readTimeout = 120000
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("Authorization", "Bearer $apiKey")
-                conn.outputStream.use { it.write(payload.toString().toByteArray()) }
-                if (conn.responseCode != 200) {
-                    val err = conn.errorStream?.bufferedReader()?.readText()
-                    error = parseError(err, conn.responseCode)
-                } else {
-                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        if (!line!!.startsWith("data:")) continue
-                        val data = line!!.removePrefix("data:").trim()
-                        if (data == "[DONE]") break
-                        val delta = JSONObject(data)
-                            .optJSONArray("choices")
-                            ?.optJSONObject(0)
-                            ?.optJSONObject("delta")
-                            ?.optString("content")
-                        if (!delta.isNullOrEmpty()) {
-                            sb.append(delta)
-                            withContext(Dispatchers.Main) {
-                                typingAnim?.cancel()
-                                typingAnim = null
-                                aiBubble.alpha = 1f
-                                aiBubble.text = sb.toString()
-                                scrollToBottom()
+                var content: String? = null
+                var lastToolCalls: JSONArray? = null
+                var rounds = 0
+                while (content == null && rounds < 3) {
+                    sb.setLength(0)
+                    rounds = rounds + 1
+                    val conn = URL("$API_BASE/chat/completions").openConnection() as HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.doOutput = true
+                    conn.connectTimeout = 20000
+                    conn.readTimeout = 120000
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("Authorization", "Bearer $apiKey")
+                    conn.outputStream.use { it.write(payload.toString().toByteArray()) }
+                    if (conn.responseCode != 200) {
+                        val err = conn.errorStream?.bufferedReader()?.readText()
+                        error = parseError(err, conn.responseCode)
+                    } else {
+                        val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            if (!line!!.startsWith("data:")) continue
+                            val data = line!!.removePrefix("data:").trim()
+                            if (data == "[DONE]") break
+                            val deltaObj = JSONObject(data)
+                                .optJSONArray("choices")
+                                ?.optJSONObject(0)
+                                ?.optJSONObject("delta")
+                            val delta = deltaObj?.optString("content")
+                            if (!delta.isNullOrEmpty()) {
+                                sb.append(delta)
+                                withContext(Dispatchers.Main) {
+                                    typingAnim?.cancel()
+                                    typingAnim = null
+                                    aiBubble.alpha = 1f
+                                    aiBubble.text = sb.toString()
+                                    scrollToBottom()
+                                }
                             }
+                            val deltaTools = deltaObj?.optJSONArray("tool_calls")
+                            if (deltaTools != null) lastToolCalls = deltaTools
                         }
+                        content = sb.toString()
                     }
+                    conn.disconnect()
+                    if (content != null) {
+                        if (lastToolCalls != null && rounds < 3) {
+                            val assistantMsg = JSONObject()
+                                .put("role", "assistant")
+                                .put("content", JSONObject.NULL)
+                                .put("tool_calls", lastToolCalls)
+                            val toolMsg = JSONObject()
+                                .put("role", "tool")
+                                .put("tool_call_id", lastToolCalls.optJSONObject(0)?.optString("id") ?: "")
+                                .put("content", "Hasil pencarian web sedang diproses, mohon hasilkan jawaban final berdasarkan informasi terbaru.")
+                            msgs.put(msgs.length(), assistantMsg)
+                            msgs.put(msgs.length(), toolMsg)
+                            payload = JSONObject()
+                                .put("model", model)
+                                .put("messages", msgs)
+                                .put("stream", true)
+                                .put("tools", webTools)
+                                .put("tool_choice", "auto")
+                            content = null
+                            lastToolCalls = null
+                            continue
+                        }
+                        break
+                    }
+                    if (rounds == 1 && error != null && Regex("(?i)tool|function|model_no_tool").containsMatchIn(error)) {
+                        payload = JSONObject()
+                            .put("model", model)
+                            .put("messages", msgs)
+                            .put("stream", true)
+                        continue
+                    }
+                    break
                 }
-                conn.disconnect()
             } catch (e: Exception) {
                 if (sb.isEmpty()) error = e.message ?: getString(R.string.error_generic)
             }

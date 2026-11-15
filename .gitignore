@@ -1,0 +1,17 @@
+.gradle/
+build/
+captures/
+local.properties
+*.apk
+*.iml
+.idea/
+.DS_Store
+
+# one-off dev helper scripts
+_advice.py
+_enable_prompt.py
+_fix_timeout.py
+_fix_welcome.py
+_patch_nc.py
+_simplify.py
+_skip_prompt.py

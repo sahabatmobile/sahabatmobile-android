@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_profile"
+        android:title="@string/profile_edit"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_profile_web"
+        android:title="@string/profile_web"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_pick_assistant"
+        android:title="@string/pick_assistant"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_pick_prompt"
+        android:title="@string/pick_prompt"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_open_web"
+        android:title="@string/open_web"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_voice_call"
+        android:title="@string/voice_call_title"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_solution_camera"
+        android:title="@string/solution_title"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_template"
+        android:title="@string/template_title"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_whatsapp_reply"
+        android:title="@string/menu_whatsapp_reply"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_clear_chat"
+        android:title="@string/clear_chat"
+        app:showAsAction="never" />
+</menu>

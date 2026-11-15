@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand core -->
+    <color name="primary">#0B57D0</color>
+    <color name="primaryDark">#0A47AE</color>
+    <color name="primaryDeep">#062A66</color>
+    <color name="primaryTint">#E7EFFD</color>
+    <color name="primarySoft">#C9DCFF</color>
+
+    <!-- Brand gradients (fixed in light & dark) -->
+    <color name="headerTop">#0B57D0</color>
+    <color name="headerMid">#0A47AE</color>
+    <color name="headerBottom">#062A66</color>
+    <color name="headerGlow">#2E7BEA</color>
+    <color name="onBrandScrim">#33000000</color>
+
+    <!-- Luxury accent -->
+    <color name="gold">#C9A227</color>
+    <color name="goldSoft">#F6ECD2</color>
+
+    <!-- Surfaces -->
+    <color name="surface">#FFFFFF</color>
+    <color name="surfaceMuted">#EFF3FB</color>
+    <color name="bgLight">#F4F7FD</color>
+    <color name="stroke">#E1E8F5</color>
+    <color name="strokeSoft">#EDF1F9</color>
+
+    <!-- Text -->
+    <color name="textPrimary">#0F172A</color>
+    <color name="textSecondary">#5C6A85</color>
+    <color name="textOnBrand">#FFFFFF</color>
+    <color name="textOnBrandMuted">#C7DBFF</color>
+
+    <!-- Bubbles -->
+    <color name="bubbleAi">#FFFFFF</color>
+    <color name="bubbleUser">#0B57D0</color>
+
+    <!-- Feedback -->
+    <color name="errorText">#B3261E</color>
+    <color name="errorBg">#FDEDEC</color>
+    <color name="errorStroke">#F3C9C6</color>
+    <color name="successText">#1B7A4B</color>
+
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="launcherBackground">#0B57D0</color>
+</resources>

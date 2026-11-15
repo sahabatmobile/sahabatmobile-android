@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_gradient">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/solution_title"
+            android:textColor="@color/textPrimary"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/solution_subtitle"
+            android:textColor="@color/textSecondary"
+            android:textSize="12.5sp"
+            android:layout_marginBottom="16dp" />
+
+        <ImageView
+            android:id="@+id/solutionPreview"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:background="@drawable/bg_input"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            android:contentDescription="@string/solution_title"
+            android:layout_marginBottom="12dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <Button
+                android:id="@+id/btnSolutionCamera"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:text="@string/solution_camera" />
+
+            <Button
+                android:id="@+id/btnSolutionGallery"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="@string/solution_gallery" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/solutionQuestion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_input"
+            android:gravity="top"
+            android:minLines="2"
+            android:padding="12dp"
+            android:hint="@string/solution_question_hint"
+            android:inputType="textMultiLine"
+            android:textColor="@color/textPrimary"
+            android:textSize="14sp"
+            android:layout_marginBottom="12dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
+
+            <Button
+                android:id="@+id/btnSolutionSolve"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:text="@string/solution_solve" />
+
+            <Button
+                android:id="@+id/btnSolutionClear"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_input"
+                android:text="@string/solution_clear"
+                android:textColor="@color/textSecondary" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/solutionProgress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/solution_result_label"
+            android:textColor="@color/textPrimary"
+            android:textSize="13.5sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:id="@+id/solutionResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_input"
+            android:gravity="top"
+            android:padding="14dp"
+            android:text="@string/solution_placeholder"
+            android:textColor="@color/textPrimary"
+            android:textSize="14sp"
+            android:layout_marginBottom="10dp" />
+
+        <Button
+            android:id="@+id/btnSolutionCopy"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:text="@string/solution_copy" />
+    </LinearLayout>
+</ScrollView>

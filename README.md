@@ -1,71 +1,139 @@
 # SahabatMobile Chat — Android
 
-Aplikasi chat Android untuk pelanggan SahabatMobile. Dua mode:
+Aplikasi AI Android untuk pelanggan SahabatMobile. Semua fitur bekerja dengan satu API key (`/api/v1`) dan model aktif (default `google/gemini-2.5-flash`, bisa LongCat 2.5 dll).
 
-1. **Chat Web (utama)** — mode chat memuat `https://www.sahabatmobile.com/ai/prompt` di WebView.
-   - Sesi login & chat pelanggan tetap tersimpan (cookie + DOM storage di-flush ke disk).
-   - Support swipe-to-refresh, progress bar, upload file, retry saat offline, back navigation.
-   - Link di luar domain sahabatmobile.com dibuka di browser eksternal.
-   - Menu **Hapus Sesi** untuk logout / login ulang.
+## 📱 Daftar Fitur
 
-2. **Chat API (native)** — chat langsung via API Gateway sesuai [docs](https://www.sahabatmobile.com/docs/api-reference):
-   - `GET /api/v1/models` — daftar model dimuat live dari server (tidak di-hardcode).
-   - `POST /api/v1/chat/completions` dengan `stream: true` — jawaban muncul kata-per-kata (SSE).
-   - `GET /api/v1/me/status` — status paket dipakai untuk **membatasi model sesuai paket**.
-   - Auth `Authorization: Bearer sk-...` (key dari `/ai/api-keys` atau `/ai/plan-details`).
-   - API key & model tersimpan di SharedPreferences perangkat, tidak dikirim ke mana pun.
-   - Riwayat percakapan (messages[]) dipertahankan selama sesi.
+### 1. Chat Web (WebView)
+- Memuat `https://www.sahabatmobile.com/ai/prompt` di WebView — sesi login & chat tetap tersimpan (cookie + DOM storage flush ke disk).
+- Swipe-to-refresh, progress bar, upload file, retry saat offline, back navigation.
+- Link di luar domain sahabatmobile.com dibuka di browser eksternal.
 
-3. **Kirim gambar** — tombol gambar di composer (galeri atau kamera).
-   - Gambar diperkecil (≤1280px, JPEG) lalu dikirim sebagai konten multimodal `image_url` (data-URI).
-   - Preview + tombol hapus sebelum dikirim; bubble user menampilkan gambarnya.
+### 2. Chat API (Native)
+- Chat langsung via API Gateway: `POST /api/v1/chat/completions` (streaming SSE) + `GET /api/v1/models` (daftar model live).
+- Riwayat percakapan tersimpan per sesi (bisa dibuka lewat drawer "Riwayat Chat").
+- **Model sesuai paket** — dari `GET /api/v1/me/status`; model di luar paket dinonaktifkan (kecuali "Tampilkan semua").
+- **Web search tool** (`web_search`) — AI mencari info/berita terbaru sebelum menjawab.
 
-4. **Kirim suara** — tombol mikrofon merekam PCM 16 kHz mono (bar rekam + timer + level meter).
-   - Audio dibungkus WAV lalu ditranskripsi via model ASR gateway (`mimo-v2.5-asr`), hasilnya otomatis dikirim sebagai pesan.
-   - Bila ASR server gagal, otomatis fallback ke dikte on-device (SpeechRecognizer).
+### 3. AI Voice Call 📞 *(baru)*
+- Panggilan suara langsung dengan AI: rekam mic → ASR (`mimo-v2.5-asr`) → balasan AI → TTS → dengarkan lagi (siklus otomatis).
+- **TTS LongCat** (suara natural + voice clone via `/v1/audio/speech`), fallback TTS Android on-device.
+- Interupsi: tekan mic saat AI bicara untuk memotong; timer panggilan; pengaturan suara (API key LongCat + voice ID).
+- Persona voice call: AI tahu sedang **menelpon** (bukan chat teks).
 
-5. **Model sesuai paket** — daftar model selalu mengikuti server (`/api/v1/models`), tanpa hardcode.
-   - Paket dideteksi dari `GET /api/v1/me/status` (`ada_paket` + `nama_paket`), dicocokkan dengan peta
-     `model_config` paket yang sama dipakai aplikasi desktop.
-   - Untuk pengguna paket: model di luar paket **dinonaktifkan** (abu-abu, "di luar paket") agar saldo
-     tidak terpotong; bisa diaktifkan lewat centang "Tampilkan semua".
-   - Untuk pengguna PAYG (tanpa paket): semua model boleh dipakai.
-   - Model aktif otomatis dialihkan ke model paket bila model sebelumnya tidak sah.
+### 4. Kamera Solusi 📷 *(baru)*
+- Foto masalah apa pun (error layar, barang rusak, mesin, dokumen, soal) → AI memberi:
+  **Diagnosis → Langkah Solusi → Pencegahan → Perlu Ahli?**
+- Dirancang untuk kondisi "tidak ada sumber akurat untuk ditanyai" — AI tidak boleh mengarang spesifikasi yang tidak terlihat di foto.
+- Foto dari kamera atau galeri; hasil bisa disalin.
 
-## Cara Build
+### 5. Template Kerja 📝 *(baru)*
+- 10 jenis dokumen siap pakai: Email Profesional, Surat Lamaran, Invoice, Laporan, Proposal, Notulen, Penawaran Harga, Surat Permohonan, Materi Belajar, dll.
+- Cukup isi brief singkat → dokumen lengkap dengan **placeholder `[seperti ini]`** untuk bagian yang perlu diedit.
+- Output markdown rapi; hasil bisa disalin.
 
-Buka folder `android/` di **Android Studio** (Ladybug atau lebih baru):
+### 6. WhatsApp AI Reply 💬
+- **Manual**: `WhatsAppReplyActivity` — ketik pesan masuk → AI → saran balasan → kirim ke WhatsApp.
+- **Otomatis**: `WhatsAppNotificationListener` — notifikasi WA masuk → AI → auto-kirim balasan.
+- Deteksi kata kunci sales, persona gaya (sales/teman/formal/campuran), **persona per kontak**, **auto-terjemahan** (balas sesuai bahasa pelanggan), FAQ & info produk.
 
-1. Android Studio akan otomatis sinkron Gradle (butuh internet untuk download Gradle 8.7 & SDK 34).
-2. Jika diminta "Install missing SDK components", klik **Install**.
-3. Build → `Build > Build Bundle(s)/APK(s) > Build APK(s)`, atau tekan **Run** dengan HP/emulator terhubung (min Android 8.0 / API 26).
+### 7. Pesan Terjadwal WhatsApp ⏰
+- Jadwalkan pesan WA (teks → tanggal → jam) yang otomatis terkirim lewat `ScheduledMessageReceiver`.
 
-Build via terminal (alternatif):
+### 8. Suara AI (TTS) 🔊
+- Balasan chat bisa dibacakan dengan suara (bahasa Indonesia) — toggle di Pengaturan.
+- Long-press bubble balasan untuk mendengarkan ulang.
 
-```
-cd android
-gradle wrapper        # sekali, jika gradlew belum ada
+### 9. Input Suara 🎤
+- Rekam PCM 16 kHz → WAV → ASR server (`mimo-v2.5-asr`) → otomatis dikirim sebagai pesan.
+- Fallback dikte on-device (SpeechRecognizer) bila ASR gagal.
+
+### 10. Kirim Gambar & Pemindaian 🖼️
+- Gambar diperkecil (≤1280px, JPEG) → dikirim multimodal `image_url` (data-URI) dengan preview + hapus.
+- **4 mode pemindaian**: 📷 Kalori (foto makanan), 🧾 Nota/Struk, 🛍️ Deskripsi Produk, 📄 Ekstrak Teks (OCR).
+
+### 11. Susun Hari Saya 📅
+- AI planner: kirim konteks kegiatan → AI menyusun jadwal → parsing otomatis jadi tugas.
+
+### 12. Dashboard Dinamis 📊
+- Ringkasan harian: tugas tertunda, aktivitas, gaya partner AI (persona chips: Umum, Teman Curhat, Dokter Umum, dll).
+
+### 13. Widget Home Screen 📱
+- Widget Android berisi ringkasan/tugas — refresh otomatis (`AssistantWidgetProvider`).
+
+### 14. Catatan Keuangan 💰
+- Lacak pengeluaran/pemasukan bulanan (`AssistantData.loadFin`) — ringkasan di Profil.
+
+### 15. Mode Fokus 🧘
+- Aktifkan mode fokus → auto-reply WA tanpa AI (pesan fokus), auto-expire.
+
+### 16. Backup & Export 💾
+- Ekspor semua data (pref + riwayat) ke file JSON (SAF) & pulihkan kembali — menu Profil.
+
+## 🛠 Cara Build
+
+**Kebutuhan:** JDK 17 · Android SDK 36 · Gradle 8.14 (sudah termasuk wrapper)
+
+### Android Studio (disarankan)
+1. Buka folder project ini di **Android Studio** (Ladybug atau lebih baru).
+2. Sinkron Gradle otomatis (butuh internet untuk download dependency).
+3. **Run** ke HP/emulator (min Android 8.0 / API 26), atau `Build > Build APK(s)`.
+
+### Terminal (tanpa Android Studio)
+```bash
+# Windows
+gradlew assembleDebug
+
+# Linux / macOS
 ./gradlew assembleDebug
 ```
+APK debug: `app/build/outputs/apk/debug/app-debug.apk`
 
-APK debug: `android/app/build/outputs/apk/debug/app-debug.apk`.
+> Catatan: pastikan `sdk.dir` di `local.properties` menunjuk ke Android SDK (otomatis dibuat Android Studio).
 
-## Rilis (Play Store)
+## 🚀 Rilis (Play Store)
 
 - Ganti `applicationId` di `app/build.gradle` bila perlu.
 - Isi `versionCode`/`versionName`.
 - Buat keystore signing (Build > Generate Signed Bundle/APK) untuk upload ke Play Console.
 
-## Struktur
+## 📂 Struktur
 
 ```
-android/
-├── app/src/main/
-│   ├── java/com/sahabatmobile/chat/
-│   │   ├── MainActivity.kt        # Chat Web: WebView /ai/prompt + sesi persisten
-│   │   └── NativeChatActivity.kt  # Chat API: /chat/completions + /models (streaming)
-│   ├── res/ (layout, menu, theme, icon, strings)
-│   └── AndroidManifest.xml
-├── build.gradle / settings.gradle / gradle.properties
-└── gradle/wrapper/gradle-wrapper.properties
+├── gradlew / gradlew.bat        # Gradle wrapper (build tanpa install Gradle)
+├── gradle/wrapper/              # gradle-wrapper.jar + properties (Gradle 8.14)
+├── build.gradle / settings.gradle
+└── app/src/main/
+    ├── java/com/sahabatmobile/chat/
+    │   ├── MainActivity.kt               # Chat Web (WebView)
+    │   ├── NativeChatActivity.kt         # Chat API native + drawer + menu utama
+    │   ├── VoiceCallActivity.kt          # AI Voice Call 📞
+    │   ├── VoiceAiClient.kt              # ASR + TTS LongCat untuk voice call
+    │   ├── SolutionCameraActivity.kt     # Kamera Solusi 📷
+    │   ├── TemplateActivity.kt           # Template Kerja 📝
+    │   ├── AiTools.kt                    # Helper AI multimodal (gambar + teks)
+    │   ├── WhatsAppReplyActivity.kt      # Saran balasan WA (manual)
+    │   ├── WhatsAppAiClient.kt           # AI client untuk WA (persona, auto-translate)
+    │   ├── WhatsAppNotificationListener.kt # Auto-reply WA (notifikasi)
+    │   ├── ScheduledMessageReceiver.kt   # Pesan terjadwal WA
+    │   ├── AssistantActivity.kt          # Asisten (tugas & pengingat)
+    │   ├── AssistantData.kt              # Data tugas, keuangan, widget
+    │   ├── AssistantWidgetProvider.kt    # Widget home screen
+    │   ├── DailySummaryReceiver.kt       # Ringkasan harian
+    │   ├── ProfileActivity.kt            # Profil & Pengaturan + Backup
+    │   ├── PromptActivity.kt             # Pilih prompt AI
+    │   ├── SettingsApi.kt                # Helper API untuk Pengaturan
+    │   └── Markdown.kt                   # Render markdown (bubble AI)
+    ├── res/ (layout, menu, drawable, theme, icon, strings)
+    ├── assets/ (assistants.json, prompts.json)
+    └── AndroidManifest.xml
 ```
+
+## 🔑 API
+
+Semua fitur memakai API key yang sama — dapatkan dari `/ai/api-keys` atau `/ai/plan-details` di website. API key disimpan di SharedPreferences perangkat, tidak dikirim ke mana pun.
+
+- `GET /api/v1/models` — daftar model
+- `POST /api/v1/chat/completions` — chat (streaming, multimodal, tools)
+- `GET /api/v1/me/status` — status paket (membatasi model)
+- `POST https://api.longcat.chat/v1/audio/speech` — TTS LongCat (opsional, untuk AI Voice Call)

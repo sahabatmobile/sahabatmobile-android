@@ -74,7 +74,8 @@ Aplikasi AI Android untuk pelanggan SahabatMobile. Semua fitur bekerja dengan sa
 - Tombol **"Pin ke Papan"** di setiap kartu saran produk Shopee di chat → produk disimpan ke papan tersendiri.
 - Anti-duplikat (URL sama tidak masuk dua kali, query diabaikan), kartu terbaru di atas, maksimal 60 kartu.
 - Tampilkan gambar, judul, **harga toko (Rp…)**, rating toko (★), dan kata kunci pencarian; bisa dibuka langsung di app Shopee, dihapus satu per satu, atau dibersihkan semua.
-- Harga diambil otomatis: halaman produk Shopee dirender di WebView tersembunyi lalu teks harganya dibaca (Shopee tidak menaruh harga di HTML). Harga disimpan agar tidak diambil dua kali; produk yang halaman-nya tidak bisa dimuat ditampilkan tanpa harga.
+- Produk yang halamannya **kosong / sudah dihapus / stok habis** otomatis tidak ikut tampil (dicek lewat HTML produk saat papan dibuka).
+- Harga diambil otomatis: halaman produk Shopee dirender di WebView tersembunyi lalu teks harganya dibaca (Shopee tidak menaruh harga di HTML). Harga disimpan agar tidak diambil dua kali; kalau Shopee meminta verifikasi/login, pengambilan otomatis dijeda dan dicoba lagi lain waktu.
 - Dibuka dari drawer **"Papan Hasil AI"** (dengan jumlah kartu) atau menu ⋮ → Papan Hasil AI.
 
 ## 🛠 Cara Build

@@ -29,8 +29,12 @@ import java.util.Locale
  * Papan Hasil AI — daftar kartu yang di-pin pengguna dari chat.
  * Isi disimpan lewat [PapanStore]; layar ini hanya menampilkan, membuka, dan menghapus kartu.
  *
- * Harga Shopee tidak ada di HTML (dirender via JS), jadi harga diambil dengan memuat
- * halaman produk di WebView tersembunyi lalu membaca teks halaman.
+ * Dua proses latar:
+ *  1. Cek status produk via HTTP biasa ([ShopeeSearch.productStatus]) ->
+ *     produk yang halamannya kosong / sudah dihapus / stok habis disembunyikan.
+ *  2. Ambil harga. Harga tidak ada di HTML Shopee (dirender via JS), jadi halaman produk
+ *     dimuat di WebView tersembunyi lalu teks harganya dibaca. Kalau Shopee meminta
+ *     verifikasi/login, pengambilan dijeda dan harga tampil belakangan.
  */
 class PapanActivity : AppCompatActivity() {
 
@@ -41,11 +45,15 @@ class PapanActivity : AppCompatActivity() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val images = mutableMapOf<String, Bitmap?>()
 
+    private var checkRunning = false
+
     private var priceWeb: WebView? = null
     private var priceUrl: String? = null
     private var priceTries = 0
     private var pricePageError = false
-    private val priceQueue = ArrayDeque<String>()
+    private var httpStatus = 0
+    private var priceQueue = ArrayDeque<String>()
+    private var pendingSet: Set<String> = emptySet()
     private val handler = Handler(Looper.getMainLooper())
     private val pollPriceRunnable = Runnable { pollPrice() }
 
@@ -62,7 +70,9 @@ class PapanActivity : AppCompatActivity() {
 
         loadBoard()
         preparePriceWeb()
-        startPrices()
+        // Beranda Shopee dibuka lebih dulu supaya WebView punya cookie sesi.
+        priceWeb?.loadUrl(HOME_URL)
+        startStatusCheck()
     }
 
     override fun onDestroy() {
@@ -79,20 +89,21 @@ class PapanActivity : AppCompatActivity() {
 
     private fun loadBoard() {
         llBoard.removeAllViews()
-        val cards = PapanStore.load(this)
+        pendingSet = pendingUrls().toSet()
+        val cards = PapanStore.loadVisible(this)
 
         tvSubtitle.text = if (cards.isEmpty()) {
             getString(R.string.papan_subtitle)
         } else {
             getString(R.string.papan_count, cards.size)
         }
-        btnClear.visibility = if (cards.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+        btnClear.visibility = if (cards.isEmpty()) View.GONE else View.VISIBLE
 
         if (cards.isEmpty()) {
             llBoard.addView(emptyView())
             return
         }
-        cards.forEachIndexed { index, card -> addCard(card, index) }
+        cards.forEach { addCard(it) }
     }
 
     private fun emptyView(): TextView {
@@ -109,7 +120,7 @@ class PapanActivity : AppCompatActivity() {
         return tv
     }
 
-    private fun addCard(card: PapanStore.Card, index: Int = 0) {
+    private fun addCard(card: PapanStore.Card) {
         val box = LinearLayout(this)
         box.orientation = LinearLayout.VERTICAL
         box.background = getDrawable(R.drawable.bg_card)
@@ -156,7 +167,7 @@ class PapanActivity : AppCompatActivity() {
         val hasPrice = card.price.isNotEmpty() && card.price != "-"
         when {
             hasPrice -> price.text = card.price
-            card.price.isEmpty() && isProduct && index < MAX_FETCH ->
+            isProduct && pendingSet.contains(card.url) ->
                 price.text = getString(R.string.papan_price_loading)
             else -> price.visibility = View.GONE
         }
@@ -251,6 +262,45 @@ class PapanActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Cek status produk via HTTP biasa (tanpa anti-bot).
+     * Produk yang halamannya kosong/dihapus atau stok habis ditandai [PapanStore.markEmpty]
+     * sehingga tidak ikut tampil.
+     */
+    private fun startStatusCheck() {
+        if (checkRunning) return
+        val targets = PapanStore.loadVisible(this).filter {
+            !it.checked && Regex("-i\\.\\d+\\.\\d+").containsMatchIn(it.url)
+        }
+        if (targets.isEmpty()) {
+            startPrices(pendingUrls())
+            return
+        }
+        checkRunning = true
+        scope.launch {
+            for (c in targets) {
+                val st = withContext(Dispatchers.IO) {
+                    try { Thread.sleep(350) } catch (e: Exception) {}
+                    ShopeeSearch.productStatus(c.url)
+                }
+                when (st) {
+                    ShopeeSearch.STATUS_DEAD, ShopeeSearch.STATUS_SOLD_OUT -> {
+                        android.util.Log.i(TAG, "buang ($st): ${c.url.takeLast(50)}")
+                        PapanStore.markEmpty(this@PapanActivity, c.url)
+                        removeCardView(c.url)
+                    }
+                    ShopeeSearch.STATUS_ALIVE ->
+                        PapanStore.markChecked(this@PapanActivity, c.url)
+                }
+            }
+            checkRunning = false
+            pendingSet = pendingUrls().toSet()
+            startPrices(pendingUrls())
+        }
+    }
+
+    // ------------------------------------------------------------------ harga
+
     private fun preparePriceWeb() {
         val wv = WebView(this)
         wv.settings.javaScriptEnabled = true
@@ -263,6 +313,7 @@ class PapanActivity : AppCompatActivity() {
         wv.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 pricePageError = false
+                httpStatus = 0
             }
 
             override fun onReceivedError(
@@ -273,7 +324,25 @@ class PapanActivity : AppCompatActivity() {
                 if (request?.isForMainFrame == true) pricePageError = true
             }
 
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?,
+                error: android.webkit.WebResourceResponse?
+            ) {
+                if (request?.isForMainFrame == true) httpStatus = error?.statusCode ?: 0
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                if (url?.contains("/verify/traffic") == true) {
+                    // Shopee meminta verifikasi -> jangan dipaksa, lanjut lain waktu.
+                    android.util.Log.w(TAG, "verifikasi Shopee, pengambilan harga dijeda")
+                    priceUrl?.let { hidePrice(it) }
+                    priceUrl = null
+                    priceQueue.clear()
+                    pausePriceFetch()
+                    return
+                }
+                try { android.webkit.CookieManager.getInstance().flush() } catch (e: Exception) {}
                 handler.removeCallbacks(pollPriceRunnable)
                 handler.postDelayed(pollPriceRunnable, 1200)
             }
@@ -285,24 +354,34 @@ class PapanActivity : AppCompatActivity() {
         priceWeb = wv
     }
 
-    /** Antrekan kartu yang harganya belum diketahui. */
-    private fun startPrices() {
-        if (priceWeb == null || priceUrl != null) return
+    /** Kartu aktif yang harganya belum diketahui. */
+    private fun pendingUrls(): List<String> {
+        if (System.currentTimeMillis() < pauseUntil()) return emptyList()
         val now = System.currentTimeMillis()
-        val pending = PapanStore.load(this)
+        return PapanStore.loadVisible(this)
             .filter {
                 val isProduct = Regex("-i\\.\\d+\\.\\d+").containsMatchIn(it.url)
-                if (!isProduct) return@filter false
-                when (it.price) {
-                    "" -> true
-                    "-" -> now - it.priceTs > RETRY_PRICE_MS
-                    else -> false
-                }
+                if (!isProduct || it.empty || !it.checked) return@filter false
+                it.price.isEmpty() || (it.price == "-" && now - it.priceTs > RETRY_PRICE_MS)
             }
             .take(MAX_FETCH)
+            .map { it.url }
+    }
+
+    private fun startPrices(urls: List<String>) {
+        if (priceWeb == null || priceUrl != null) return
         priceQueue.clear()
-        priceQueue.addAll(pending.map { it.url })
+        priceQueue.addAll(urls)
         if (priceQueue.isNotEmpty()) nextPrice()
+    }
+
+    /** Jeda sementara setelah Shopee minta verifikasi/login. */
+    private fun pauseUntil(): Long =
+        getSharedPreferences("sm_prefs", MODE_PRIVATE).getLong("papan_price_pause", 0L)
+
+    private fun pausePriceFetch() {
+        getSharedPreferences("sm_prefs", MODE_PRIVATE).edit()
+            .putLong("papan_price_pause", System.currentTimeMillis() + PAUSE_MS).apply()
     }
 
     private fun nextPrice() {
@@ -315,6 +394,7 @@ class PapanActivity : AppCompatActivity() {
         priceUrl = url
         priceTries = 0
         pricePageError = false
+        httpStatus = 0
         handler.removeCallbacks(pollPriceRunnable)
         wv.stopLoading()
         wv.loadUrl(url)
@@ -328,22 +408,43 @@ class PapanActivity : AppCompatActivity() {
             if (priceUrl != url) return@evaluateJavascript
             val res = parseJsPrice(raw)
             val price = res.first
-            if (price.isNotEmpty()) {
-                PapanStore.setPrice(this, url, price)
-                showPrice(url, price)
-                priceUrl = null
-                handler.postDelayed({ nextPrice() }, 600)
-            } else if (priceTries < MAX_TRIES) {
-                handler.postDelayed(pollPriceRunnable, 1800)
-            } else {
-                android.util.Log.w(TAG, "harga tak ketemu: $url | ${res.second}")
-                // Halaman terbuka normal tapi harga tetap tak ketemu -> coba lagi setelah beberapa jam.
-                if (!pricePageError) PapanStore.setPrice(this, url, "-")
-                hidePrice(url)
-                priceUrl = null
-                nextPrice()
+            when {
+                // Diblokir Shopee (403/429) -> jeda, bukan berarti produk kosong.
+                httpStatus in 400..599 -> {
+                    android.util.Log.w(TAG, "diblokir ($httpStatus), jeda")
+                    hidePrice(url)
+                    priceUrl = null
+                    priceQueue.clear()
+                    pausePriceFetch()
+                }
+                price.isNotEmpty() -> {
+                    PapanStore.setPrice(this, url, price)
+                    showPrice(url, price)
+                    priceUrl = null
+                    scheduleNext(PAGE_GAP_MS)
+                }
+                priceTries < MAX_TRIES -> {
+                    handler.postDelayed(pollPriceRunnable, 1800)
+                }
+                else -> {
+                    android.util.Log.w(TAG, "harga tak ketemu: ${url.takeLast(50)} | ${res.second}")
+                    val blocked = res.second.isEmpty() || res.second.contains("Masuk", true)
+                    if (blocked) {
+                        // Halaman kosong / minta login -> hentikan sisa antrean, coba lagi lain waktu.
+                        priceQueue.clear()
+                        pausePriceFetch()
+                    }
+                    if (!pricePageError) PapanStore.setPrice(this, url, "-")
+                    hidePrice(url)
+                    priceUrl = null
+                    if (!blocked) scheduleNext(PAGE_GAP_MS)
+                }
             }
         }
+    }
+
+    private fun scheduleNext(delayMs: Long) {
+        handler.postDelayed({ nextPrice() }, delayMs)
     }
 
     private fun showPrice(url: String, price: String) {
@@ -357,6 +458,16 @@ class PapanActivity : AppCompatActivity() {
         val tv = llBoard.findViewWithTag<TextView>("price:$url") ?: return
         tv.text = ""
         tv.visibility = View.GONE
+    }
+
+    /** Hilangkan kartu dari layar (produk kosong / stok habis). */
+    private fun removeCardView(url: String) {
+        val tv = llBoard.findViewWithTag<TextView>("price:$url") ?: return
+        val card = tv.parent?.parent?.parent as? View ?: return
+        llBoard.removeView(card)
+        val visible = PapanStore.loadVisible(this).size
+        tvSubtitle.text = getString(R.string.papan_count, visible)
+        btnClear.visibility = if (visible == 0) View.GONE else View.VISIBLE
     }
 
     /** Hasil evaluateJavascript: JSON {"p": harga, "t": cuplikan teks halaman}. */
@@ -392,9 +503,12 @@ class PapanActivity : AppCompatActivity() {
         const val TAG = "SM_PAPAN"
         const val PRICE_UA =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
-        const val MAX_FETCH = 12
-        const val MAX_TRIES = 10
+        const val MAX_FETCH = 5
+        const val MAX_TRIES = 6
+        const val PAGE_GAP_MS = 8000L
+        const val PAUSE_MS = 30 * 60 * 1000L
         const val RETRY_PRICE_MS = 6 * 60 * 60 * 1000L
-        const val JS_PRICE = """(function(){try{var b=document.body.cloneNode(true);var s=b.querySelectorAll('script,style,noscript');for(var i=0;i<s.length;i++){s[i].parentNode.removeChild(s[i]);}var out='';var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null);var n;while(n=w.nextNode()){var t=(n.nodeValue||'').replace(/\s+/g,'');if(/^Rp\d{3,}$/.test(t)){out=t;break;}}if(!out){var all=(b.textContent||'').replace(/\s+/g,'');var m=all.match(/Rp(\d{4,})/);if(m){out='Rp'+m[1];}}if(out){var v=parseInt(out.replace('Rp',''),10);if(!(v>=1000)){out='';}}return JSON.stringify({p:out,t:(b.textContent||'').substring(0,400)});}catch(e){return JSON.stringify({p:'',t:''});}})()"""
+        const val HOME_URL = "https://shopee.co.id/"
+        const val JS_PRICE = """(function(){try{var out='',flat='';var b=document.body?document.body.cloneNode(true):null;if(b){var s=b.querySelectorAll('script,style,noscript');for(var i=0;i<s.length;i++){s[i].parentNode.removeChild(s[i]);}var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null),n;while(n=w.nextNode()){var t=(n.nodeValue||'').replace(/\s+/g,'');if(/^Rp\d{3,}$/.test(t)){out=t;break;}}flat=(b.textContent||'').replace(/\s+/g,' ');if(!out){var m=flat.match(/Rp(\d{4,})/);if(m){out='Rp'+m[1];}}if(out){var v=parseInt(out.replace('Rp',''),10);if(!(v>=1000)){out='';}}}return JSON.stringify({p:out,t:flat.substring(0,200)});}catch(err){return JSON.stringify({p:'',t:''});}})()"""
     }
 }

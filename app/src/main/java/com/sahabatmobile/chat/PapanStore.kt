@@ -32,7 +32,11 @@ object PapanStore {
         /** Harga siap tampil, mis. "Rp180.000". Kosong = belum diambil, "-" = tidak tersedia. */
         val price: String = "",
         /** Waktu pengambilan harga terakhir (untuk mencoba lagi setelah beberapa jam). */
-        val priceTs: Long = 0L
+        val priceTs: Long = 0L,
+        /** true = produk kosong / habis / halamannya tidak ada -> disembunyikan dari papan. */
+        val empty: Boolean = false,
+        /** true = halaman produk sudah pernah dicek (harga + status stok). */
+        val checked: Boolean = false
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("type", type)
@@ -44,6 +48,8 @@ object PapanStore {
             .put("ts", ts)
             .put("price", price)
             .put("priceTs", priceTs)
+            .put("empty", empty)
+            .put("checked", checked)
 
         companion object {
             /** Kompatibel dengan data lama (hanya title/url/image). */
@@ -56,7 +62,9 @@ object PapanStore {
                 type = o.optString("type", TYPE_SHOPEE),
                 ts = o.optLong("ts"),
                 price = o.optString("price"),
-                priceTs = o.optLong("priceTs")
+                priceTs = o.optLong("priceTs"),
+                empty = o.optBoolean("empty", false),
+                checked = o.optBoolean("checked", false)
             )
         }
     }
@@ -77,6 +85,9 @@ object PapanStore {
         return out
     }
 
+    /** Kartu yang tampil di papan (produk kosong/sold out disembunyikan). */
+    fun loadVisible(context: Context): List<Card> = load(context).filterNot { it.empty }
+
     /**
      * Pin sekumpulan produk ke papan.
      * @return jumlah kartu baru yang benar-benar ditambahkan (0 = semua sudah ada).
@@ -84,12 +95,21 @@ object PapanStore {
     fun pin(context: Context, cards: List<Card>): Int {
         if (cards.isEmpty()) return 0
         val current = load(context).toMutableList()
-        val known = current.mapTo(mutableSetOf()) { keyOf(it.url) }
         var added = 0
         // Iterasi terbalik agar urutan hasil pencarian (1,2,3...) tetap terbaca di papan:
         // produk pertama dari pencarian menjadi paling atas.
         for (c in cards.asReversed()) {
-            if (c.url.isEmpty() || !known.add(keyOf(c.url))) continue
+            if (c.url.isEmpty()) continue
+            val key = keyOf(c.url)
+            val idx = current.indexOfFirst { keyOf(it.url) == key }
+            if (idx >= 0) {
+                // Kartu lama ditandai kosong/sold out -> ganti dengan data terbaru.
+                if (current[idx].empty) {
+                    current[idx] = c
+                    added++
+                }
+                continue
+            }
             current.add(0, c)
             added++
         }
@@ -98,6 +118,38 @@ object PapanStore {
             save(context, current)
         }
         return added
+    }
+
+    /** Tandai produk sebagai kosong/sold out -> disembunyikan dari papan. */
+    fun markEmpty(context: Context, url: String) {
+        val key = keyOf(url)
+        val cards = load(context)
+        var changed = false
+        val next = cards.map {
+            if (keyOf(it.url) == key && (!it.empty || !it.checked)) {
+                changed = true
+                it.copy(empty = true, checked = true)
+            } else {
+                it
+            }
+        }
+        if (changed) save(context, next)
+    }
+
+    /** Tandai produk sudah dicek dan masih aktif. */
+    fun markChecked(context: Context, url: String) {
+        val key = keyOf(url)
+        val cards = load(context)
+        var changed = false
+        val next = cards.map {
+            if (keyOf(it.url) == key && !it.checked) {
+                changed = true
+                it.copy(checked = true)
+            } else {
+                it
+            }
+        }
+        if (changed) save(context, next)
     }
 
     fun remove(context: Context, url: String) {
@@ -112,9 +164,19 @@ object PapanStore {
         val cards = load(context)
         var changed = false
         val next = cards.map {
-            if (keyOf(it.url) == key && (it.price != price || it.priceTs == 0L)) {
-                changed = true
-                it.copy(price = price, priceTs = System.currentTimeMillis())
+            if (keyOf(it.url) == key) {
+                // Harga lama yang sudah ketemu tidak ditimpa kalau harga baru tidak ditemukan.
+                val keep = if ((price.isEmpty() || price == "-") && it.price.isNotEmpty() && it.price != "-") {
+                    it.price
+                } else {
+                    if (price.isEmpty()) "-" else price
+                }
+                if (it.price != keep || !it.checked) {
+                    changed = true
+                    it.copy(price = keep, priceTs = System.currentTimeMillis(), checked = true)
+                } else {
+                    it
+                }
             } else {
                 it
             }

@@ -272,6 +272,23 @@ object ShopeeSearch {
         return out
     }
 
+    /**
+     * Status produk untuk Papan Hasil AI (dicek lewat HTML, tanpa anti-bot).
+     * @return [STATUS_ALIVE], [STATUS_DEAD] (halaman kosong/produk dihapus),
+     *         [STATUS_SOLD_OUT], atau [STATUS_UNKNOWN] kalau halaman gagal dimuat.
+     */
+    fun productStatus(url: String): Int {
+        val html = try { httpGet(url) } catch (e: Exception) { null } ?: return STATUS_UNKNOWN
+        if (!Regex("\"itemid\"\\s*:\\s*\\d+").containsMatchIn(html)) return STATUS_DEAD
+        if (html.contains("\"stock_display\":\"STOK HABIS\"")) return STATUS_SOLD_OUT
+        return STATUS_ALIVE
+    }
+
+    const val STATUS_UNKNOWN = -1
+    const val STATUS_ALIVE = 0
+    const val STATUS_DEAD = 1
+    const val STATUS_SOLD_OUT = 2
+
     fun fetchOgMeta(url: String): Pair<String?, String?>? {
         val html = try { httpGet(url) } catch (e: Exception) { null } ?: return null
         val title = Regex("property=\"og:title\"[^>]*content=\"([^\"]*)\"").find(html)?.groupValues?.get(1)

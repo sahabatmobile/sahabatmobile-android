@@ -1,14 +1,19 @@
 package com.sahabatmobile.chat
 
+import android.graphics.Bitmap
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.BackgroundColorSpan
+import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.LeadingMarginSpan
 import android.text.style.LeadingMarginSpan.Standard
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
+import android.text.style.URLSpan
+import android.net.Uri
+import android.view.View
 
 /**
  * Renderer markdown ringan untuk bubble jawaban AI.
@@ -18,6 +23,26 @@ import android.text.style.TypefaceSpan
  * Semua penanda markdown dibersihkan sehingga tidak pernah tampil mentah di layar.
  */
 object Markdown {
+
+    /** Penanda gambar markdown ![alt](url) — nanti diganti ImageSpan bitmap oleh activity. */
+    class ImageRef(val url: String)
+
+    /** Cache bitmap gambar yang pernah dimuat (agar tidak diunduh ulang). */
+    val bitmapCache = mutableMapOf<String, Bitmap>()
+
+    /** Span link yang membuka browser/app eksternal, aman untuk dipakai ulang. */
+    class URLSpanCompat(private val url: String) : ClickableSpan() {
+        override fun onClick(widget: View) {
+            try {
+                widget.context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (e: Exception) {
+            }
+        }
+
+        override fun updateDrawState(ds: android.text.TextPaint) {
+            ds.isUnderlineText = false
+        }
+    }
 
     data class Theme(
         val text: Int,
@@ -256,8 +281,53 @@ object Markdown {
         }
     }
 
-    /** Teks sebaris: **tebal**, *miring*, `kode`, __tebal__. */
+    /** Teks sebaris: **tebal**, *miring*, `kode`, __tebal__, gambar ![alt](url), link [teks](url). */
+    private val IMG_RX = Regex("!\\[[^\\]]*\\]\\((https?://[^)\\s]+)\\)")
+    private val LINK_RX = Regex("\\[([^\\]]+)\\]\\((https?://[^)\\s]+)\\)")
+    private val URL_RX = Regex("(https?://[^\\s`*_<()]{8,})")
+
     private fun appendInline(out: SpannableStringBuilder, line: String, theme: Theme) {
+        // Sisipkan gambar markdown sebagai placeholder \uFFFC + ImageRef
+        if (IMG_RX.containsMatchIn(line)) {
+            var pos = 0
+            for (m in IMG_RX.findAll(line)) {
+                if (m.range.first > pos) appendInline(out, line.substring(pos, m.range.first), theme)
+                val start = out.length
+                out.append("\uFFFC")
+                out.setSpan(ImageRef(m.groupValues[1]), start, out.length, SPAN)
+                pos = m.range.last + 1
+            }
+            if (pos < line.length) appendInline(out, line.substring(pos), theme)
+            return
+        }
+        // Link markdown [teks](url) → teks berwarna aksen yang bisa di-tap
+        if (LINK_RX.containsMatchIn(line)) {
+            var pos = 0
+            for (m in LINK_RX.findAll(line)) {
+                if (m.range.first > pos) appendInline(out, line.substring(pos, m.range.first), theme)
+                val start = out.length
+                out.append(m.groupValues[1])
+                out.setSpan(URLSpanCompat(m.groupValues[2]), start, out.length, SPAN)
+                out.setSpan(ForegroundColorSpan(theme.accent), start, out.length, SPAN)
+                pos = m.range.last + 1
+            }
+            if (pos < line.length) appendInline(out, line.substring(pos), theme)
+            return
+        }
+        // URL mentah → bisa di-tap
+        if (URL_RX.containsMatchIn(line)) {
+            var pos = 0
+            for (m in URL_RX.findAll(line)) {
+                if (m.range.first > pos) appendInline(out, line.substring(pos, m.range.first), theme)
+                val start = out.length
+                val url = m.groupValues[1].trimEnd('.', ',', ')')
+                out.append(url)
+                out.setSpan(URLSpanCompat(url), start, start + url.length, SPAN)
+                pos = m.range.first + url.length
+            }
+            if (pos < line.length) appendInline(out, line.substring(pos), theme)
+            return
+        }
         var i = 0
         while (i < line.length) {
             val ch = line[i]

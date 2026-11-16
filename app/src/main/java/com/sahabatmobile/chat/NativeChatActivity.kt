@@ -15,6 +15,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.net.Uri
+import android.text.Spanned
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -881,9 +882,55 @@ class NativeChatActivity : AppCompatActivity() {
         quote = getColor(R.color.textSecondary)
     )
 
-    /** Terapkan markdown ke bubble AI (menampilkan **tebal** sebagai tebal, bukan teks mentah). */
+    /** Terapkan markdown ke bubble AI; gambar ![](url) dimuat async lalu disisipkan sebagai ImageSpan. */
     private fun applyMarkdown(tv: TextView, text: String) {
-        tv.text = Markdown.render(text, markdownTheme())
+        val rendered = Markdown.render(text, markdownTheme())
+        tv.text = rendered
+        if (rendered is android.text.Spannable) {
+            val refs = rendered.getSpans(0, rendered.length, Markdown.ImageRef::class.java)
+            for (ref in refs) {
+                val url = ref.url
+                val cached = Markdown.bitmapCache[url]
+                if (cached != null) {
+                    insertImageSpan(rendered, ref, cached, tv)
+                } else {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val bmp = ShopeeSearch.loadImage(url)
+                        if (bmp != null) {
+                            Markdown.bitmapCache[url] = bmp
+                            withContext(Dispatchers.Main) {
+                                // Span mungkin berpindah posisi saat teks streaming → cari ulang
+                                val fresh = (tv.text as? android.text.Spannable)
+                                    ?.getSpans(0, tv.text.length, Markdown.ImageRef::class.java)
+                                    ?.firstOrNull { it.url == url } ?: return@withContext
+                                insertImageSpan(tv.text as android.text.Spannable, fresh, bmp, tv)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun insertImageSpan(
+        spannable: android.text.Spannable,
+        ref: Markdown.ImageRef,
+        bmp: android.graphics.Bitmap,
+        tv: TextView
+    ) {
+        val st = spannable.getSpanStart(ref)
+        val en = spannable.getSpanEnd(ref)
+        if (st < 0 || en <= st) return
+        spannable.removeSpan(ref)
+        val d = android.graphics.drawable.BitmapDrawable(resources, bmp)
+        val w = dp(230)
+        val h = (bmp.height.toLong() * w / bmp.width.coerceAtLeast(1)).toInt().coerceIn(dp(60), dp(320))
+        d.setBounds(0, 0, w, h)
+        spannable.setSpan(
+            android.text.style.ImageSpan(d, android.text.style.DynamicDrawableSpan.ALIGN_BOTTOM),
+            st, en, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        tv.invalidate()
     }
 
     private fun addBubble(text: String, isUser: Boolean, imagePath: String? = null): TextView {
@@ -907,6 +954,8 @@ class NativeChatActivity : AppCompatActivity() {
             tv.text = text
         } else {
             applyMarkdown(tv, text)
+            tv.movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            tv.highlightColor = getColor(R.color.primaryTint)
         }
         tv.setOnLongClickListener {
             if (isUser) {
@@ -984,6 +1033,131 @@ class NativeChatActivity : AppCompatActivity() {
         bubbleContainer.addView(row)
         scrollToBottom()
         return tv
+    }
+
+    /**
+     * Kartu saran produk Shopee — tampil di chat setelah tool shopee_search.
+     * Tap salah satu produk → langsung dibuka di app Shopee.
+     */
+    private fun addProductCard(keyword: String, products: List<ShopeeProduct>) {
+        if (products.isEmpty()) return
+        val pad = resources.getDimensionPixelSize(R.dimen.bubble_padding)
+
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.background = getDrawable(R.drawable.bg_bubble_ai)
+        card.elevation = dp(1).toFloat()
+        card.setPadding(pad, pad, pad, pad)
+
+        val header = TextView(this)
+        header.text = "🛒 Saran Produk Shopee — \"$keyword\""
+        header.textSize = 13f
+        header.setTypeface(null, android.graphics.Typeface.BOLD)
+        header.setTextColor(getColor(R.color.primary))
+        card.addView(header)
+
+        products.forEachIndexed { idx, p ->
+            val itemRow = LinearLayout(this)
+            itemRow.orientation = LinearLayout.HORIZONTAL
+            itemRow.gravity = Gravity.CENTER_VERTICAL
+            itemRow.setPadding(dp(6), dp(8), dp(6), dp(8))
+            itemRow.background = getDrawable(R.drawable.bg_preview)
+
+            if (p.image != null) {
+                val thumb = ImageView(this)
+                thumb.scaleType = ImageView.ScaleType.CENTER_CROP
+                thumb.clipToOutline = true
+                thumb.background = getDrawable(R.drawable.bg_preview)
+                thumb.contentDescription = p.title
+                thumb.layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+                (thumb.layoutParams as LinearLayout.LayoutParams).marginEnd = dp(10)
+                CoroutineScope(Dispatchers.IO).launch {
+                    val bmp = ShopeeSearch.loadImage(p.image)
+                    if (bmp != null) {
+                        withContext(Dispatchers.Main) { thumb.setImageBitmap(bmp) }
+                    }
+                }
+                itemRow.addView(thumb)
+            }
+
+            val num = TextView(this)
+            num.text = "${idx + 1}.  "
+            num.textSize = 14f
+            num.setTextColor(getColor(R.color.primary))
+            num.setTypeface(null, android.graphics.Typeface.BOLD)
+            itemRow.addView(num)
+
+            val title = TextView(this)
+            title.text = p.title
+            title.textSize = 13.5f
+            title.setTextColor(getColor(R.color.textPrimary))
+            title.maxLines = 2
+            title.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            itemRow.addView(title)
+
+            val arrow = TextView(this)
+            arrow.text = "  ›"
+            arrow.textSize = 16f
+            arrow.setTextColor(getColor(R.color.primary))
+            itemRow.addView(arrow)
+
+            itemRow.setOnClickListener {
+                ShopeeSearch.openInShopee(this, p.url)
+                Toast.makeText(this, "Membuka di app Shopee...", Toast.LENGTH_SHORT).show()
+            }
+            card.addView(itemRow)
+        }
+
+        val footer = TextView(this)
+        footer.text = "Tap produk untuk buka di app Shopee"
+        footer.textSize = 10.5f
+        footer.setTextColor(getColor(R.color.textSecondary))
+        val fp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        fp.topMargin = dp(8)
+        footer.layoutParams = fp
+        card.addView(footer)
+
+        // Bungkus dengan avatar & label seperti bubble AI
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.TOP
+
+        val avatar = ImageView(this)
+        avatar.setImageResource(R.drawable.ic_premium)
+        avatar.background = getDrawable(R.drawable.bg_premium_circle)
+        avatar.setPadding(dp(4), dp(4), dp(4), dp(4))
+        avatar.contentDescription = getString(R.string.brand_small)
+        val avParams = LinearLayout.LayoutParams(dp(30), dp(30))
+        avParams.marginEnd = dp(8)
+        avatar.layoutParams = avParams
+        row.addView(avatar)
+
+        val column = LinearLayout(this)
+        column.orientation = LinearLayout.VERTICAL
+        val name = TextView(this)
+        name.text = getString(R.string.brand_small)
+        name.textSize = 10.5f
+        name.letterSpacing = 0.06f
+        name.setTextColor(getColor(R.color.primary))
+        name.setPadding(dp(2), 0, 0, dp(4))
+        column.addView(name)
+        card.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        column.addView(card)
+        val colParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        column.layoutParams = colParams
+        row.addView(column)
+
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.topMargin = resources.getDimensionPixelSize(R.dimen.bubble_margin)
+        row.layoutParams = params
+        bubbleContainer.addView(row)
+        scrollToBottom()
     }
 
     private fun loadPersonaChips() {
@@ -2077,6 +2251,8 @@ class NativeChatActivity : AppCompatActivity() {
         sendJob = CoroutineScope(Dispatchers.IO).launch {
             var error: String? = null
             val sb = StringBuilder()
+            var shopeeHistoryMsg: JSONObject? = null
+            var cardOnly = false
             try {
                 val msgs = JSONArray()
                 val ass = assistant.optString("prompt")
@@ -2091,37 +2267,20 @@ class NativeChatActivity : AppCompatActivity() {
                     pendingPlanParse = true
                     plannerContext = null
                 }
-                val webSearchInstruction = "Jika pertanyaan memerlukan info terbaru, berita, atau data terkini, gunakan pencarian web sebelum menjawab."
-                if (systemText.isEmpty()) systemText = webSearchInstruction
+                val webSearchInstruction = "Jika pertanyaan memerlukan info terbaru, berita, atau data terkini, gunakan pencarian web sebelum menjawab. " +
+                    "Jika pengguna mencari atau ingin membeli produk barang (harga, rekomendasi belanja), gunakan tool shopee_search untuk mencari produk di Shopee. " +
+                    "Jika pengguna mencari atau ingin membeli produk barang (harga, rekomendasi belanja), SELALU gunakan tool shopee_search untuk mencari produk di Shopee. Jangan jawab hanya dengan keyword/kata kunci. " +
+                    "Jawaban kamu selalu berupa teks biasa - jangan sisipkan gambar, tabel besar, atau tautan markdown. Gambar produk hanya sudah ditampilkan otomatis di kartu hasil pencarian."
                 if (systemText.isNotEmpty() && !systemText.contains("pencarian web", ignoreCase = true)) {
                     systemText = systemText + "\n\n" + webSearchInstruction
                 }
                 if (systemText.isNotEmpty()) msgs.put(JSONObject().put("role", "system").put("content", systemText))
                 for (i in 0 until history.length()) {
                     val m = history.getJSONObject(i)
-                    val imgPath = m.optString("image")
-                    if (imgPath.isNotEmpty()) {
-                        val dataUri = imageDataUri(imgPath)
-                        if (dataUri != null) {
-                            val parts = JSONArray()
-                            val captionText = m.optString("content")
-                            if (captionText.isNotEmpty()) {
-                                parts.put(
-                                    JSONObject().put("type", "text").put("text", captionText)
-                                )
-                            }
-                            parts.put(
-                                JSONObject().put("type", "image_url").put(
-                                    "image_url", JSONObject().put("url", dataUri)
-                                )
-                            )
-                            msgs.put(
-                                JSONObject().put("role", "user").put("content", parts)
-                            )
-                            continue
-                        }
-                    }
-                    msgs.put(JSONObject().put("role", m.optString("role")).put("content", m.optString("content")))
+                    val role = m.optString("role").ifEmpty { "user" }
+                    val raw = m.opt("content")
+                    if (raw == null) continue
+                    msgs.put(JSONObject().put("role", role).put("content", raw))
                 }
 
                 val webSearchParams = JSONObject()
@@ -2134,13 +2293,27 @@ class NativeChatActivity : AppCompatActivity() {
                         .put("name", "web_search")
                         .put("description", "Mencari informasi terbaru dari internet berdasarkan kata kunci yang diberikan.")
                         .put("parameters", webSearchParams))
+                val shopeeParams = JSONObject()
+                    .put("type", "object")
+                    .put("properties", JSONObject().put("keyword", JSONObject().put("type", "string").put("description", "Nama produk yang dicari pengguna di Shopee, mis: power bank 10000mah.")))
+                    .put("required", JSONArray().put("keyword"))
+                val shopeeTools = JSONObject()
+                    .put("type", "function")
+                    .put("function", JSONObject()
+                        .put("name", "shopee_search")
+                        .put("description", "Mencari produk di Shopee Indonesia dan menampilkan 5 produk terbaik sebagai saran di chat.")
+                        .put("parameters", shopeeParams))
+                val toolsArray = JSONArray().put(webTools).put(shopeeTools)
+                val lastUserText = msgs.getJSONObject(msgs.length() - 1).optString("content")
+                val forceShopee = Regex("(?i)shopee|beli|jual|jaket|koko|baju|sepatu|celana|kemeja|hoodie|tshirt|pakaian|kaos|polo|tas|dompet|power|charger|iphone|samsung|tablet|laptop|earphone|headphone|speaker|celengan|mantel").containsMatchIn(lastUserText)
+                val toolChoice: Any = if (forceShopee) JSONObject().put("type", "function").put("function", JSONObject().put("name", "shopee_search")) else "auto"
                 var payload = JSONObject()
                     .put("model", model)
                     .put("messages", msgs)
                     .put("stream", true)
                     .put("max_tokens", 8000)
-                    .put("tools", JSONArray().put(webTools))
-                    .put("tool_choice", "auto")
+                    .put("tools", toolsArray)
+                    .put("tool_choice", toolChoice)
 
                 var content: String? = null
                 // Akumulator tool_calls streaming (datang bertahap: id, nama, lalu argumen)
@@ -2148,6 +2321,7 @@ class NativeChatActivity : AppCompatActivity() {
                 val toolNames = mutableMapOf<Int, StringBuilder>()
                 val toolArgs = mutableMapOf<Int, StringBuilder>()
                 var rounds = 0
+                var cardRendered = false
                 while (content == null && rounds < 3) {
                     sb.setLength(0)
                     rounds = rounds + 1
@@ -2231,33 +2405,108 @@ class NativeChatActivity : AppCompatActivity() {
                         // Susun tool_calls lengkap dari potongan streaming
                         val assembled = assembleToolCalls(toolIds, toolNames, toolArgs)
                         if (assembled != null && rounds < 3) {
-                            val firstCall = assembled.optJSONObject(0)
-                            val callId = firstCall?.optString("id")?.takeIf { it.isNotEmpty() } ?: "call_1"
-                            val args = firstCall?.optJSONObject("function")?.optString("arguments") ?: "{}"
-                            val query = runCatching { JSONObject(args).optString("query") }.getOrDefault("")
-                            val resultText = if (query.isNotEmpty()) {
-                                "Hasil pencarian web untuk \"$query\" sedang diproses oleh sistem. " +
-                                    "Berdasarkan pengetahuan terbarumu, berikan jawaban final yang lengkap dan praktis."
-                            } else {
-                                "Hasil pencarian web sedang diproses oleh sistem. " +
-                                    "Berdasarkan pengetahuan terbarumu, berikan jawaban final yang lengkap dan praktis."
+                            val toolMsgs = JSONArray()
+                            var shopeeFound = false
+                            var hasOtherTool = false
+                            for (ci in 0 until assembled.length()) {
+                                val call = assembled.optJSONObject(ci) ?: continue
+                                val callId = call.optString("id").takeIf { it.isNotEmpty() } ?: "call_$ci"
+                                val fnName = call.optJSONObject("function")?.optString("name") ?: ""
+                                val argsStr = call.optJSONObject("function")?.optString("arguments") ?: "{}"
+                                val argsJson = runCatching { JSONObject(argsStr) }.getOrDefault(JSONObject())
+                                val resultText: String = when (fnName) {
+                                    "shopee_search" -> {
+                                        val kw = argsJson.optString("keyword").ifEmpty {
+                                            argsJson.optString("query")
+                                        }
+                                        if (cardRendered) {
+                                            // Sudah ada kartu di giliran ini → jangan cari & render lagi
+                                            "Saran produk sudah ditampilkan di kartu. Gunakan satu kartu saja."
+                                        } else {
+                                        val products = try {
+                                            ShopeeSearch.search(kw)
+                                        } catch (e: Exception) {
+                                            emptyList()
+                                        }
+                                        if (products.isNotEmpty()) {
+                                            shopeeFound = true
+                                            cardRendered = true
+                                            val md = StringBuilder()
+                                                .append("🛒 **Saran Produk Shopee — \"").append(kw).append("\"**\n")
+                                            products.forEachIndexed { idx, p ->
+                                                md.append(idx + 1).append(". [").append(p.title).append("](").append(p.url).append(")\n")
+                                            }
+                                            shopeeHistoryMsg = JSONObject()
+                                                .put("role", "assistant")
+                                                .put("content", md.toString().trim())
+                                            withContext(Dispatchers.Main) {
+                                                addProductCard(kw, products)
+                                            }
+                                            try {
+                                                val arr = JSONArray()
+                                                products.forEach { p ->
+                                                    arr.put(JSONObject()
+.put("title", p.title)
+.put("url", p.url)
+                                                        .put("image", p.image ?: ""))
+                                                }
+                                                getSharedPreferences("sm_prefs", MODE_PRIVATE).edit().putString("papan_cards", arr.toString()).apply()
+                                            } catch (e: Exception) {}
+                                            val sb2 = StringBuilder()
+                                                .append("Hasil pencarian produk Shopee untuk \"").append(kw).append("\":\n")
+                                            products.forEachIndexed { idx, p ->
+                                                sb2.append(idx + 1).append(". ").append(p.title)
+                                                if (!p.image.isNullOrEmpty()) sb2.append(" (gambar: ").append(p.image).append(")")
+                                                sb2.append(" — ").append(p.url).append("\n")
+                                            }
+                                            sb2.append("Kartu 5 produk (dengan gambar) sudah ditampilkan di chat. Jangan ulang daftar produk dalam jawaban — cukup singkat saja bahwa sarannya sudah tampil di kartu.")
+                                            sb2.toString()
+                                        } else {
+                                            "Tidak menemukan hasil produk Shopee untuk \"$kw\". Berikan rekomendasi 5 produk terbaik untuk \"$kw\" berdasarkan pengetahuanmu."
+                                        }
+                                        }
+                                    }
+                                    "web_search" -> {
+                                        hasOtherTool = true
+                                        val query = argsJson.optString("query")
+                                        if (query.isNotEmpty()) {
+                                            "Hasil pencarian web untuk \"$query\" sedang diproses oleh sistem. " +
+                                                "Berdasarkan pengetahuan terbarumu, berikan jawaban final yang lengkap dan praktis."
+                                        } else {
+                                            "Hasil pencarian web sedang diproses oleh sistem. " +
+                                                "Berdasarkan pengetahuan terbarumu, berikan jawaban final yang lengkap dan praktis."
+                                        }
+                                    }
+                                    else -> {
+                                        hasOtherTool = true
+                                        "Tool \"$fnName\" tidak tersedia."
+                                    }
+                                }
+                                toolMsgs.put(
+                                    JSONObject()
+                                        .put("role", "tool")
+                                        .put("tool_call_id", callId)
+                                        .put("content", resultText)
+                                )
+                            }
+                            // Pencarian Shopee sukses → tampilkan kartu saja (tanpa bubble teks tambahan)
+                            if (shopeeFound && !hasOtherTool && fnAllShopee(assembled)) {
+                                cardOnly = true
+                                sb.setLength(0)
+                                break
                             }
                             val assistantMsg = JSONObject()
                                 .put("role", "assistant")
                                 .put("content", JSONObject.NULL)
                                 .put("tool_calls", assembled)
-                            val toolMsg = JSONObject()
-                                .put("role", "tool")
-                                .put("tool_call_id", callId)
-                                .put("content", resultText)
                             msgs.put(msgs.length(), assistantMsg)
-                            msgs.put(msgs.length(), toolMsg)
+                            for (ti in 0 until toolMsgs.length()) msgs.put(msgs.length(), toolMsgs.getJSONObject(ti))
                             payload = JSONObject()
                                 .put("model", model)
                                 .put("messages", msgs)
                                 .put("stream", true)
                                 .put("max_tokens", 8000)
-                                .put("tools", JSONArray().put(webTools))
+                                .put("tools", toolsArray)
                                 .put("tool_choice", "auto")
                             content = null
                             toolIds.clear(); toolNames.clear(); toolArgs.clear()
@@ -2287,6 +2536,34 @@ class NativeChatActivity : AppCompatActivity() {
                     }
                     break
                 }
+
+                // Paksa pencarian produk bila intent produk terdeteksi tetapi model tidak memanggil tool
+                if (forceShopee && !cardRendered && error == null) {
+                    val kwDirect = lastUserText
+                        .replace(Regex("(?i)\\b(cari|carikan|beli|belikan|tolong|mohon|shopee|di|yang|untuk|dong|ya|please|search|find|produk|barang)\\b"), " ")
+                        .trim()
+                        .ifEmpty { lastUserText }
+                    val productsDirect = try { ShopeeSearch.search(kwDirect) } catch (e: Exception) { emptyList() }
+                    if (productsDirect.isNotEmpty()) {
+                        cardRendered = true
+                        cardOnly = true
+                        sb.setLength(0)
+                        val mdDirect = StringBuilder()
+                            .append("?? **Saran Produk Shopee - \"").append(kwDirect).append("\"**\n")
+                        productsDirect.forEachIndexed { idx, p ->
+                            mdDirect.append(idx + 1).append(". [").append(p.title).append("](").append(p.url).append(")\n")
+                        }
+                        shopeeHistoryMsg = JSONObject().put("role", "assistant").put("content", mdDirect.toString().trim())
+                        try {
+                            val arrD = JSONArray()
+                            productsDirect.forEach { p ->
+                                arrD.put(JSONObject().put("title", p.title).put("url", p.url).put("image", p.image ?: ""))
+                            }
+                            getSharedPreferences("sm_prefs", MODE_PRIVATE).edit().putString("papan_cards", arrD.toString()).apply()
+                        } catch (e: Exception) {}
+                        withContext(Dispatchers.Main) { addProductCard(kwDirect, productsDirect) }
+                    }
+                }
             } catch (e: Exception) {
                 if (sb.isEmpty()) error = e.message ?: getString(R.string.error_generic)
             }
@@ -2312,7 +2589,17 @@ class NativeChatActivity : AppCompatActivity() {
                         if (history.getJSONObject(i) == userMsg) history.remove(i)
                     }
                     updateWelcome()
+                } else if (cardOnly) {
+                    // Hanya kartu produk yang ditampilkan → sembunyikan bubble teks kosong
+                    aiBubble.visibility = View.GONE
+                    aiBubble.parent?.let { parent ->
+                        (parent.parent as? View)?.visibility = View.GONE
+                    }
+                    shopeeHistoryMsg?.let { history.put(it) }
+                    saveCurrentSession()
                 } else if (sb.isNotEmpty()) {
+                    applyMarkdown(aiBubble, sb.toString())
+                    shopeeHistoryMsg?.let { history.put(it) }
                     history.put(
                         JSONObject().put("role", "assistant").put("content", sb.toString())
                     )
@@ -2337,6 +2624,15 @@ class NativeChatActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /** True jika semua tool_calls adalah shopee_search. */
+    private fun fnAllShopee(assembled: JSONArray): Boolean {
+        for (i in 0 until assembled.length()) {
+            val fn = assembled.optJSONObject(i)?.optJSONObject("function")?.optString("name") ?: ""
+            if (fn != "shopee_search") return false
+        }
+        return assembled.length() > 0
     }
 
     /**

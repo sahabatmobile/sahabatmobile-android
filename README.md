@@ -71,7 +71,7 @@ Aplikasi AI Android untuk pelanggan SahabatMobile. Semua fitur bekerja dengan sa
 - Ekspor semua data (pref + riwayat) ke file JSON (SAF) & pulihkan kembali — menu Profil.
 
 ### 17. Papan Hasil AI 📌
-- Tombol **"Pin ke Papan"** di setiap kartu saran produk Shopee di chat → produk disimpan ke papan tersendiri.
+- Tombol **"Pin ke Papan"** di setiap kartu saran produk di chat → produk disimpan ke papan tersendiri.
 - Anti-duplikat (URL sama tidak masuk dua kali, query diabaikan), kartu terbaru di atas, maksimal 60 kartu.
 - Tampilkan gambar, judul, **harga toko (Rp…)**, rating toko (★), dan kata kunci pencarian; bisa dibuka langsung di app Shopee, dihapus satu per satu, atau dibersihkan semua.
 - Produk yang halamannya **kosong / sudah dihapus / stok habis** otomatis tidak ikut tampil (dicek lewat HTML produk saat papan dibuka).
@@ -79,6 +79,12 @@ Aplikasi AI Android untuk pelanggan SahabatMobile. Semua fitur bekerja dengan sa
 - Rating & jumlah terjual tampil di kartu ("Rating 4,9", "Terjual 3rb").
 - Harga diambil otomatis: halaman produk Shopee dirender di WebView tersembunyi lalu teks harganya dibaca (Shopee tidak menaruh harga di HTML). Harga disimpan agar tidak diambil dua kali; kalau Shopee meminta verifikasi, pengambilan otomatis dijeda dan bisa dilewati lewat tombol "Verifikasi Shopee" di papan.
 - Dibuka dari drawer **"Papan Hasil AI"** (dengan jumlah kartu) atau menu ⋮ → Papan Hasil AI.
+
+### 18. Pencarian Multi-Marketplace 🛒
+- Tool `market_search` otomatis terpakai saat pengguna minta dicarikan produk (default **Shopee**, bisa menyebut **Tokopedia**, **Blibli**, atau **Lazada**).
+- Kartu produk di chat menampilkan nama marketplace dan membuka produk di app marketplace-nya.
+- Data produk diambil lewat HTML halaman produk (tanpa login): **Tokopedia** (harga, rating, terjual, stok), **Lazada** (harga, stok), **Shopee** (stok; harga/rating via render halaman), **Blibli** (data terbatas — halaman dikunci Cloudflare).
+- Produk yang sudah dihapus (404) / stok habis otomatis disembunyikan dari Papan Hasil AI.
 
 ## 🛠 Cara Build
 
@@ -123,7 +129,7 @@ APK debug: `app/build/outputs/apk/debug/app-debug.apk`
     │   ├── TemplateActivity.kt           # Template Kerja 📝
     │   ├── PapanActivity.kt              # Papan Hasil AI 📌
     │   ├── PapanStore.kt                 # Simpan kartu papan (pin/anti-duplikat)
-    │   ├── ShopeeSearch.kt               # Cari produk Shopee (Bing/DuckDuckGo)
+    │   ├── MarketSearch.kt               # Cari produk multi-marketplace (Bing/DuckDuckGo)
     │   ├── AiTools.kt                    # Helper AI multimodal (gambar + teks)
     │   ├── WhatsAppReplyActivity.kt      # Saran balasan WA (manual)
     │   ├── WhatsAppAiClient.kt           # AI client untuk WA (persona, auto-translate)

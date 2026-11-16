@@ -38,7 +38,9 @@ object PapanStore {
         /** true = halaman produk sudah pernah dicek (harga + status stok). */
         val checked: Boolean = false,
         /** Jumlah terjual dari halaman produk (0 = belum diketahui). */
-        val sold: Int = 0
+        val sold: Int = 0,
+        /** Marketplace asal produk: "shopee", "tokopedia", "blibli", "lazada". */
+        val market: String = "shopee"
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("type", type)
@@ -53,6 +55,7 @@ object PapanStore {
             .put("empty", empty)
             .put("checked", checked)
             .put("sold", sold)
+            .put("market", market)
 
         companion object {
             /** Kompatibel dengan data lama (hanya title/url/image). */
@@ -68,7 +71,8 @@ object PapanStore {
                 priceTs = o.optLong("priceTs"),
                 empty = o.optBoolean("empty", false),
                 checked = o.optBoolean("checked", false),
-                sold = o.optInt("sold")
+                sold = o.optInt("sold"),
+                market = o.optString("market", "shopee")
             )
         }
     }

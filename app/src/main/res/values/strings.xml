@@ -297,6 +297,7 @@
     <string name="papan_pinned">%1$d produk ditambahkan ke papan</string>
     <string name="papan_pin_dup">Semua produk ini sudah ada di papan</string>
     <string name="papan_open_shopee">Buka di Shopee</string>
+    <string name="papan_open_market">Buka di %1$s</string>
     <string name="papan_remove">Hapus</string>
     <string name="papan_clear">Bersihkan</string>
     <string name="papan_clear_confirm">Hapus semua kartu dari papan?</string>
@@ -310,4 +311,5 @@
     <string name="papan_verify_title">Verifikasi Shopee</string>
     <string name="papan_verify_done">Selesai</string>
     <string name="papan_tap_hint">Tap produk untuk buka di Shopee</string>
+    <string name="market_tap_hint">Tap produk untuk buka di %1$s</string>
 </resources>

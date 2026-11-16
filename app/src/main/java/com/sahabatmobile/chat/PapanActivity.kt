@@ -30,7 +30,7 @@ import java.util.Locale
  * Isi disimpan lewat [PapanStore]; layar ini hanya menampilkan, membuka, dan menghapus kartu.
  *
  * Dua proses latar:
- *  1. Cek status produk via HTTP biasa ([ShopeeSearch.productStatus]) ->
+ *  1. Cek status + data produk via HTTP biasa ([MarketSearch.productInfo]) ->
  *     produk yang halamannya kosong / sudah dihapus / stok habis disembunyikan.
  *  2. Ambil harga. Harga tidak ada di HTML Shopee (dirender via JS), jadi halaman produk
  *     dimuat di WebView tersembunyi lalu teks harganya dibaca. Kalau Shopee meminta
@@ -73,6 +73,13 @@ class PapanActivity : AppCompatActivity() {
         preparePriceWeb()
         // Beranda Shopee dibuka lebih dulu supaya WebView punya cookie sesi.
         priceWeb?.loadUrl(HOME_URL)
+        startStatusCheck()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Kartu baru mungkin saja baru dipin dari chat -> muat ulang & cek yang belum dicek.
+        loadBoard()
         startStatusCheck()
     }
 
@@ -213,7 +220,8 @@ class PapanActivity : AppCompatActivity() {
         title.ellipsize = TextUtils.TruncateAt.END
         column.addView(title)
 
-        val isProduct = Regex("-i\\.\\d+\\.\\d+").containsMatchIn(card.url)
+        val market = MarketSearch.marketOf(card.url)
+        val isProduct = market?.isProductUrl(card.url) ?: false
         val price = TextView(this)
         price.tag = "price:${card.url}"
         price.textSize = 14f
@@ -238,6 +246,16 @@ class PapanActivity : AppCompatActivity() {
         )
         metaParams.topMargin = dp(3)
         meta.layoutParams = metaParams
+
+        if (market != null) {
+            val badge = TextView(this)
+            badge.text = market.label
+            badge.textSize = 10f
+            badge.setTypeface(null, android.graphics.Typeface.BOLD)
+            badge.setTextColor(getColor(R.color.textSecondary))
+            badge.setPadding(0, 0, dp(8), 0)
+            meta.addView(badge)
+        }
 
         if (card.rating > 0.0) {
             val rating = TextView(this)
@@ -284,13 +302,13 @@ class PapanActivity : AppCompatActivity() {
         actions.layoutParams = actParams
 
         val open = TextView(this)
-        open.text = getString(R.string.papan_open_shopee)
+        open.text = getString(R.string.papan_open_market, market?.label ?: "Toko")
         open.textSize = 12f
         open.setTypeface(null, android.graphics.Typeface.BOLD)
         open.setTextColor(getColor(R.color.primary))
         open.setPadding(0, dp(8), dp(18), dp(8))
         open.isClickable = true
-        open.setOnClickListener { ShopeeSearch.openInShopee(this, card.url) }
+        open.setOnClickListener { MarketSearch.openInMarket(this, card.url) }
         actions.addView(open)
 
         val del = TextView(this)
@@ -318,22 +336,21 @@ class PapanActivity : AppCompatActivity() {
             return
         }
         scope.launch {
-            val bmp = withContext(Dispatchers.IO) { ShopeeSearch.loadImage(url) }
+            val bmp = withContext(Dispatchers.IO) { MarketSearch.loadImage(url) }
             images[url] = bmp
             if (bmp != null) iv.setImageBitmap(bmp)
         }
     }
 
     /**
-     * Cek status produk via HTTP biasa (tanpa anti-bot).
-     * Produk yang halamannya kosong/dihapus atau stok habis ditandai [PapanStore.markEmpty]
-     * sehingga tidak ikut tampil.
+     * Cek status + data produk via HTTP biasa (tanpa anti-bot).
+     * Untuk Tokopedia & Lazada harga/rating/terjual sudah ikut terbaca di sini.
+     * Produk yang halamannya kosong / sudah dihapus / stok habis ditandai
+     * [PapanStore.markEmpty] sehingga tidak ikut tampil.
      */
     private fun startStatusCheck() {
         if (checkRunning) return
-        val targets = PapanStore.loadVisible(this).filter {
-            !it.checked && Regex("-i\\.\\d+\\.\\d+").containsMatchIn(it.url)
-        }
+        val targets = PapanStore.loadVisible(this).filter { !it.checked }
         if (targets.isEmpty()) {
             handler.postDelayed({ startPrices(pendingUrls()) }, 2500)
             return
@@ -341,22 +358,38 @@ class PapanActivity : AppCompatActivity() {
         checkRunning = true
         scope.launch {
             for (c in targets) {
-                val st = withContext(Dispatchers.IO) {
-                    try { Thread.sleep(350) } catch (e: Exception) {}
-                    ShopeeSearch.productStatus(c.url)
+                val market = MarketSearch.marketOf(c.url)
+                val info = withContext(Dispatchers.IO) {
+                    try {
+                        Thread.sleep(350)
+                    } catch (e: Exception) {
+                    }
+                    if (market == null) ProductInfo(status = MarketSearch.STATUS_UNKNOWN)
+                    else MarketSearch.productInfo(market, c.url)
                 }
-                when (st) {
-                    ShopeeSearch.STATUS_DEAD, ShopeeSearch.STATUS_SOLD_OUT -> {
-                        android.util.Log.i(TAG, "buang ($st): ${c.url.takeLast(50)}")
+                when (info.status) {
+                    MarketSearch.STATUS_DEAD, MarketSearch.STATUS_SOLD_OUT -> {
+                        android.util.Log.i(TAG, "buang (${info.status}): ${c.url.takeLast(50)}")
                         PapanStore.markEmpty(this@PapanActivity, c.url)
                         removeCardView(c.url)
                     }
-                    ShopeeSearch.STATUS_ALIVE ->
-                        PapanStore.markChecked(this@PapanActivity, c.url)
+
+                    MarketSearch.STATUS_ALIVE -> {
+                        if (info.price.isNotEmpty() || info.rating > 0 || info.sold > 0) {
+                            PapanStore.setInfo(
+                                this@PapanActivity, c.url,
+                                info.price, info.rating, info.sold
+                            )
+                        } else {
+                            // Belum ada data harga/rating (mis. Shopee) -> dicoba lewat WebView.
+                            PapanStore.markChecked(this@PapanActivity, c.url)
+                        }
+                    }
                 }
             }
             checkRunning = false
-            pendingSet = pendingUrls().toSet()
+            // Muat ulang agar harga/rating/terjual yang baru terbaca langsung tampil.
+            loadBoard()
             handler.postDelayed({ startPrices(pendingUrls()) }, 2500)
         }
     }
@@ -416,14 +449,14 @@ class PapanActivity : AppCompatActivity() {
         priceWeb = wv
     }
 
-    /** Kartu aktif yang harganya belum diketahui. */
+    /** Kartu yang harganya belum diketahui (diambil lewat WebView). */
     private fun pendingUrls(): List<String> {
         if (System.currentTimeMillis() < pauseUntil()) return emptyList()
         val now = System.currentTimeMillis()
         return PapanStore.loadVisible(this)
             .filter {
-                val isProduct = Regex("-i\\.\\d+\\.\\d+").containsMatchIn(it.url)
-                if (!isProduct || it.empty || !it.checked) return@filter false
+                val market = MarketSearch.marketOf(it.url) ?: return@filter false
+                if (!market.isProductUrl(it.url) || it.empty || !it.checked) return@filter false
                 it.price.isEmpty() || (it.price == "-" && now - it.priceTs > RETRY_PRICE_MS)
             }
             .take(MAX_FETCH)

@@ -96,6 +96,16 @@
     <string name="focus_default_reply">Halo! 😊 Sedang fokus dulu ya. Akan segera membalas. Terima kasih! 🙏</string>
     <string name="backup_export">📤 Backup Data (Export)</string>
     <string name="backup_import">📥 Restore Data (Import)</string>
+    <string name="updater_check">Cek Pembaruan</string>
+    <string name="updater_checking">Memeriksa pembaruan...</string>
+    <string name="updater_uptodate">Kamu sudah memakai versi terbaru (%1$s).</string>
+    <string name="updater_new_title">Pembaruan tersedia (%1$s)</string>
+    <string name="updater_new_desc">Versi baru aplikasi tersedia. Unduh dan pasang dari sini.</string>
+    <string name="updater_download">Unduh &amp; Pasang</string>
+    <string name="updater_allow_install">Izinkan pemasangan aplikasi dari sumber ini, lalu coba lagi.</string>
+    <string name="updater_progress">Mengunduh pembaruan... %1$d%%</string>
+    <string name="updater_failed">Unduhan gagal. Periksa koneksi lalu coba lagi.</string>
+    <string name="updater_done">Unduhan selesai, memasang...</string>
     <string name="wa_sent_toast">Saran terkirim ke WhatsApp</string>
     <string name="onboarding_title">SahabatMobile Chat</string>
     <string name="brand_small">SahabatMobile AI</string>

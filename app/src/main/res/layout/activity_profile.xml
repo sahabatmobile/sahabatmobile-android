@@ -964,6 +964,16 @@
                     android:text="@string/backup_import"
                     android:textColor="@color/textPrimary"
                     android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnUpdate"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="@color/primary"
+                    android:text="@string/updater_check"
+                    android:textColor="@color/textOnBrand"
+                    android:textSize="13sp" />
             </LinearLayout>
         </ScrollView>
 

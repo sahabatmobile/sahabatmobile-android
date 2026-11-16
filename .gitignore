@@ -15,3 +15,6 @@ _fix_welcome.py
 _patch_nc.py
 _simplify.py
 _skip_prompt.py
+# Keystore rilis (jangan pernah di-commit)
+release-keystore.jks
+release-keystore-pass.txt

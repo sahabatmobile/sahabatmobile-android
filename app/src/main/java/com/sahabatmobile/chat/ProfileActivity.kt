@@ -91,6 +91,7 @@ class ProfileActivity : AppCompatActivity() {
     private lateinit var tvFocusStatus: TextView
     private lateinit var btnBackup: Button
     private lateinit var btnRestore: Button
+    private lateinit var btnUpdate: Button
 
     // Fitur #10: Backup & Export
     private val exportLauncher = registerForActivityResult(
@@ -340,6 +341,7 @@ class ProfileActivity : AppCompatActivity() {
                 Toast.makeText(this, "Tidak bisa membuka penyimpan", Toast.LENGTH_SHORT).show()
             }
         }
+        btnUpdate.setOnClickListener { checkUpdate() }
 
         findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
     }
@@ -388,6 +390,7 @@ class ProfileActivity : AppCompatActivity() {
         tvFocusStatus = findViewById(R.id.tvFocusStatus)
         btnBackup = findViewById(R.id.btnBackup)
         btnRestore = findViewById(R.id.btnRestore)
+        btnUpdate = findViewById(R.id.btnUpdate)
         btnClearHistory = findViewById(R.id.btnClearHistory)
 
         tabProfile = findViewById(R.id.tabProfile)
@@ -1222,6 +1225,81 @@ class ProfileActivity : AppCompatActivity() {
             recreate()
         } catch (e: Exception) {
             Toast.makeText(this, "Restore gagal: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Update otomatis: cek rilis terbaru aplikasi di GitHub. */
+    private fun checkUpdate() {
+        val current = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+        btnUpdate.isEnabled = false
+        btnUpdate.text = getString(R.string.updater_checking)
+        Thread {
+            val rel = Updater.latest()
+            runOnUiThread {
+                btnUpdate.isEnabled = true
+                btnUpdate.text = getString(R.string.updater_check)
+                if (rel == null) {
+                    Toast.makeText(this, R.string.updater_failed, Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                if (!Updater.isNewer(rel.tag, current)) {
+                    Toast.makeText(
+                        this, getString(R.string.updater_uptodate, current), Toast.LENGTH_LONG
+                    ).show()
+                    return@runOnUiThread
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.updater_new_title, rel.tag))
+                    .setMessage(rel.notes.ifBlank { getString(R.string.updater_new_desc) })
+                    .setPositiveButton(R.string.updater_download) { _, _ -> downloadAndInstall(rel) }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun downloadAndInstall(rel: Updater.Release) {
+        if (!Updater.ensureInstallAllowed(this)) {
+            Toast.makeText(this, R.string.updater_allow_install, Toast.LENGTH_LONG).show()
+        }
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(20), dp(12), dp(20), 0)
+        val pb = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+        pb.isIndeterminate = false
+        pb.max = 100
+        box.addView(pb)
+        val tv = TextView(this)
+        tv.text = getString(R.string.updater_progress, 0)
+        tv.textSize = 12f
+        tv.setPadding(0, dp(8), 0, dp(12))
+        box.addView(tv)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.updater_download)
+            .setView(box)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        Updater.download(this, rel.apkUrl, rel.apkName) { pct, file ->
+            runOnUiThread {
+                if (pct < 0) {
+                    dialog.dismiss()
+                    Toast.makeText(this, R.string.updater_failed, Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                if (file != null) {
+                    dialog.dismiss()
+                    Toast.makeText(this, R.string.updater_done, Toast.LENGTH_SHORT).show()
+                    Updater.install(this, file)
+                } else {
+                    pb.progress = pct
+                    tv.text = getString(R.string.updater_progress, pct)
+                }
+            }
         }
     }
 

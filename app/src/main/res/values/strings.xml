@@ -312,4 +312,5 @@
     <string name="papan_verify_done">Selesai</string>
     <string name="papan_tap_hint">Tap produk untuk buka di Shopee</string>
     <string name="market_tap_hint">Tap produk untuk buka di %1$s</string>
+    <string name="market_tap_hint_multi">Tap produk untuk buka di app marketplace-nya</string>
 </resources>

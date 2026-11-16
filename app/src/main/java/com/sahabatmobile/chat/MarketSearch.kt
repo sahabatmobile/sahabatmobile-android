@@ -84,6 +84,25 @@ object MarketSearch {
 
     // ------------------------------------------------------------- pencarian
 
+    /** Marketplace yang datanya bisa dimuat otomatis (Blibli dikunci Cloudflare). */
+    val LOADABLE_MARKETS = listOf(Market.SHOPEE, Market.TOKOPEDIA, Market.LAZADA)
+
+    /**
+     * Cari di semua marketplace sekaligus (dipakai saat pengguna tidak menyebut
+     * marketplace tertentu). Hasil digabung, urut per marketplace.
+     */
+    fun searchMulti(keyword: String, perMarket: Int = 2): List<MarketProduct> {
+        val out = mutableListOf<MarketProduct>()
+        for (m in LOADABLE_MARKETS) {
+            out.addAll(try {
+                search(m, keyword, perMarket)
+            } catch (e: Exception) {
+                emptyList()
+            })
+        }
+        return out
+    }
+
     fun search(market: Market, keyword: String, limit: Int = 5): List<MarketProduct> {
         if (keyword.isBlank()) return emptyList()
         val cacheKey = "${market.name}|${keyword.trim().lowercase()}"
@@ -111,9 +130,10 @@ object MarketSearch {
             emptyList()
         }
 
-        var raw = searchWeb(keyword, limit * 2, market)
+        // Cukup dari pencarian gambar? -> jangan buang waktu ke mesin pencari web.
+        var raw = if (fromImages.size >= limit) emptyList() else searchWeb(keyword, limit * 2, market)
         var attempt = 1
-        while (raw.isEmpty() && attempt < 3) {
+        while (raw.isEmpty() && attempt < 2 && fromImages.size < limit) {
             try {
                 Thread.sleep(2000L * attempt)
             } catch (e: Exception) {
@@ -270,15 +290,6 @@ object MarketSearch {
         var out = if (!lite.isNullOrEmpty()) extractResults(lite, limit, market) else emptyList()
         if (out.isEmpty()) {
             try {
-                val post = httpPost("https://html.duckduckgo.com/html/", "q=$q&kl=id-id")
-                android.util.Log.i(TAG, "htmlPost len=${post?.length ?: -1}")
-                if (!post.isNullOrEmpty()) out = extractResults(post, limit, market)
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "htmlPost failed: ${e.message}")
-            }
-        }
-        if (out.isEmpty()) {
-            try {
                 val bing = httpGet("https://www.bing.com/search?q=$q&setlang=id&count=30")
                 android.util.Log.i(TAG, "bing len=${bing?.length ?: -1}")
                 if (!bing.isNullOrEmpty()) out = extractResults(bing, limit, market)
@@ -369,13 +380,23 @@ object MarketSearch {
                 ProductInfo(price = price, status = statusFromHtml(html))
             }
 
-            Market.SHOPEE -> ProductInfo(status = statusFromHtml(html))
+            Market.SHOPEE -> {
+                // Shopee tidak punya JSON-LD Product -> pakai penanda khas Shopee.
+                val status = when {
+                    html.length < 30_000 -> STATUS_UNKNOWN // halaman tidak lengkap/terblokir
+                    !Regex("\"itemid\"\\s*:\\s*\\d+").containsMatchIn(html) -> STATUS_DEAD
+                    html.contains("\"stock_display\":\"STOK HABIS\"") -> STATUS_SOLD_OUT
+                    else -> STATUS_ALIVE
+                }
+                ProductInfo(status = status)
+            }
 
             Market.BLIBLI -> ProductInfo(status = STATUS_UNKNOWN)
         }
     }
 
     private fun statusFromHtml(html: String): Int = when {
+        html.length < 30_000 -> STATUS_UNKNOWN // halaman tidak lengkap/terblokir
         !Regex("\"@type\"\\s*:\\s*\"Product").containsMatchIn(html) -> STATUS_DEAD
         html.contains("https://schema.org/OutOfStock") -> STATUS_SOLD_OUT
         html.contains("\"stock_display\":\"STOK HABIS\"") -> STATUS_SOLD_OUT
@@ -448,8 +469,8 @@ object MarketSearch {
     /** Seperti [httpGet] tapi juga mengembalikan kode status HTTP (untuk membedakan 404). */
     private fun httpGetWithCode(url: String): Pair<Int, String>? {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 15000
-        conn.readTimeout = 20000
+        conn.connectTimeout = 8000
+        conn.readTimeout = 12000
         conn.setRequestProperty("User-Agent", UA)
         conn.setRequestProperty("Accept-Language", "id-ID,id;q=0.9")
         try {
@@ -468,8 +489,8 @@ object MarketSearch {
 
     private fun httpGet(url: String): String? {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 15000
-        conn.readTimeout = 20000
+        conn.connectTimeout = 8000
+        conn.readTimeout = 12000
         conn.setRequestProperty("User-Agent", UA)
         conn.setRequestProperty("Accept-Language", "id-ID,id;q=0.9")
         try {
@@ -480,22 +501,6 @@ object MarketSearch {
         }
     }
 
-    private fun httpPost(url: String, body: String): String? {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.doOutput = true
-        conn.connectTimeout = 15000
-        conn.readTimeout = 20000
-        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-        conn.setRequestProperty("User-Agent", UA)
-        try {
-            conn.outputStream.use { it.write(body.toByteArray()) }
-            if (conn.responseCode != 200) return null
-            return BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-        } finally {
-            conn.disconnect()
-        }
-    }
 
     private fun extractUrl(href: String): String? {
         if (href.contains("uddg=")) {

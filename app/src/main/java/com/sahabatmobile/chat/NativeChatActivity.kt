@@ -1061,9 +1061,11 @@ class NativeChatActivity : AppCompatActivity() {
      * Kartu saran produk marketplace — tampil di chat setelah tool market_search.
      * Tap salah satu produk → langsung dibuka di app Shopee.
      */
-    private fun addProductCard(keyword: String, products: List<MarketProduct>) {
+    private fun addProductCard(keyword: String, products: List<MarketProduct>, pinned: Int = 0) {
         if (products.isEmpty()) return
-        val market = products.firstOrNull()?.market ?: Market.SHOPEE
+        val markets = products.map { it.market }.distinct()
+        val marketLabel = if (markets.size == 1) markets.first().label
+        else markets.joinToString(", ") { it.label }
         val pad = resources.getDimensionPixelSize(R.dimen.bubble_padding)
 
         val card = LinearLayout(this)
@@ -1073,7 +1075,7 @@ class NativeChatActivity : AppCompatActivity() {
         card.setPadding(pad, pad, pad, pad)
 
         val header = TextView(this)
-        header.text = "🛒 Saran Produk ${market.label} — \"$keyword\""
+        header.text = "🛒 Saran Produk $marketLabel — \"$keyword\""
         header.textSize = 13f
         header.setTypeface(null, android.graphics.Typeface.BOLD)
         header.setTextColor(getColor(R.color.primary))
@@ -1110,13 +1112,28 @@ class NativeChatActivity : AppCompatActivity() {
             num.setTypeface(null, android.graphics.Typeface.BOLD)
             itemRow.addView(num)
 
+            val infoCol = LinearLayout(this)
+            infoCol.orientation = LinearLayout.VERTICAL
+            infoCol.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+
+            val badge = TextView(this)
+            badge.text = p.market.label
+            badge.textSize = 9.5f
+            badge.setTypeface(null, android.graphics.Typeface.BOLD)
+            badge.setTextColor(getColor(R.color.textSecondary))
+            infoCol.addView(badge)
+
             val title = TextView(this)
             title.text = p.title
             title.textSize = 13.5f
             title.setTextColor(getColor(R.color.textPrimary))
             title.maxLines = 2
-            title.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            itemRow.addView(title)
+            title.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            infoCol.addView(title)
+            itemRow.addView(infoCol)
 
             val arrow = TextView(this)
             arrow.text = "  ›"
@@ -1126,7 +1143,7 @@ class NativeChatActivity : AppCompatActivity() {
 
             itemRow.setOnClickListener {
                 MarketSearch.openInMarket(this, p.url)
-                Toast.makeText(this, "Membuka di app ${market.label}...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Membuka di app ${p.market.label}...", Toast.LENGTH_SHORT).show()
             }
             card.addView(itemRow)
         }
@@ -1140,16 +1157,18 @@ class NativeChatActivity : AppCompatActivity() {
         footerRow.layoutParams = fp
 
         val footer = TextView(this)
-        footer.text = getString(R.string.market_tap_hint, market.label)
+        footer.text = if (markets.size == 1) getString(R.string.market_tap_hint, marketLabel)
+        else getString(R.string.market_tap_hint_multi)
         footer.textSize = 10.5f
         footer.setTextColor(getColor(R.color.textSecondary))
         footer.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         footerRow.addView(footer)
 
         val pin = TextView(this)
-        pin.text = getString(R.string.papan_pin)
+        // Produk sudah otomatis tersimpan saat kartu dibuat.
+        pin.text = getString(if (pinned > 0) R.string.papan_pin_done else R.string.papan_pin)
         pin.textSize = 11.5f
-        pin.setTextColor(getColor(R.color.primary))
+        pin.setTextColor(getColor(if (pinned > 0) R.color.successText else R.color.primary))
         pin.setTypeface(null, android.graphics.Typeface.BOLD)
         pin.background = getDrawable(R.drawable.bg_chip)
         pin.setPadding(dp(10), dp(6), dp(10), dp(6))
@@ -2318,8 +2337,8 @@ class NativeChatActivity : AppCompatActivity() {
                 }
                 val webSearchInstruction = "Jika pertanyaan memerlukan info terbaru, berita, atau data terkini, gunakan pencarian web sebelum menjawab. " +
                     "Jika pengguna mencari atau ingin membeli produk barang (harga, rekomendasi belanja), SELALU gunakan tool market_search untuk mencari produk di marketplace " +
-                    "(Shopee, Tokopedia, Blibli, atau Lazada - sesuai yang diminta pengguna, default Shopee). Hasil pencarian otomatis menjadi kartu produk dan bisa disimpan ke Papan Hasil AI. " +
-                    "Jangan jawab hanya dengan keyword/kata kunci. " +
+                    "(Shopee, Tokopedia, Blibli, atau Lazada - sesuai yang diminta pengguna; jika tidak disebut, biarkan parameter marketplace kosong supaya semua marketplace dicari). Hasil pencarian otomatis menjadi kartu produk dan otomatis tersimpan ke Papan Hasil AI. " +
+                    "Jangan jawab hanya dengan keyword/kata kunci, dan jangan pernah mengatakan kartu produk sudah tampil bila kamu belum benar-benar memanggil tool-nya. " +
                     "Jawaban kamu selalu berupa teks biasa - jangan sisipkan gambar, tabel besar, atau tautan markdown. Gambar produk hanya sudah ditampilkan otomatis di kartu hasil pencarian."
                 if (systemText.isNotEmpty() && !systemText.contains("pencarian web", ignoreCase = true)) {
                     systemText = systemText + "\n\n" + webSearchInstruction
@@ -2346,23 +2365,29 @@ class NativeChatActivity : AppCompatActivity() {
                 val marketParams = JSONObject()
                     .put("type", "object")
                     .put("properties", JSONObject()
-                        .put("keyword", JSONObject().put("type", "string").put("description", "Nama produk yang dicari pengguna, mis: power bank 10000mah."))
+                        .put("keyword", JSONObject().put("type", "string").put("description", "Nama produk yang dicari pengguna, mis: sandal laki laki."))
                         .put("marketplace", JSONObject().put("type", "string")
                             .put("enum", JSONArray().put("shopee").put("tokopedia").put("blibli").put("lazada"))
-                            .put("description", "Marketplace tujuan pencarian. Default: shopee.")))
+                            .put("description", "Marketplace tujuan. BIARKAN KOSONG jika pengguna tidak menyebut marketplace, maka Shopee + Tokopedia + Lazada dicari sekaligus.")))
                     .put("required", JSONArray().put("keyword"))
                 val marketTools = JSONObject()
                     .put("type", "function")
                     .put("function", JSONObject()
                         .put("name", "market_search")
-                        .put("description", "Mencari produk di marketplace Indonesia (Shopee, Tokopedia, Blibli, Lazada) dan menampilkan 5 produk terbaik sebagai saran di chat.")
+                        .put("description", "Mencari produk di marketplace Indonesia (Shopee, Tokopedia, Blibli, Lazada) dan menampilkan produk terbaik sebagai saran di chat. Hasil otomatis tersimpan di Papan Hasil AI.")
                         .put("parameters", marketParams))
                 val toolsArray = JSONArray().put(webTools).put(marketTools)
                 val lastUserText = msgs.getJSONObject(msgs.length() - 1).optString("content")
-                // Marketplace tujuan: dari nama yang disebut di pesan, default Shopee.
-                val marketFromText = Market.values()
-                    .firstOrNull { lastUserText.contains(it.label, true) } ?: Market.SHOPEE
-                val forceMarket = Regex("(?i)shopee|tokopedia|blibli|lazada|marketplace|beli|jual|jaket|koko|baju|sepatu|celana|kemeja|hoodie|tshirt|pakaian|kaos|polo|tas|dompet|power|charger|iphone|samsung|tablet|laptop|earphone|headphone|speaker|celengan|mantel").containsMatchIn(lastUserText)
+                // Marketplace yang disebut di pesan; null = tidak disebut -> cari di semua.
+                val marketFromText: Market? = Market.values()
+                    .firstOrNull { lastUserText.contains(it.label, true) }
+                // Intent mencari/beli produk -> paksa tool market_search dipanggil.
+                val hasSearchVerb = Regex("(?i)\\b(cari|carikan|cariin|beli|belikan|butuh|rekomendasi|rekomendasikan|pilihkan|saranin)\\b")
+                    .containsMatchIn(lastUserText)
+                val isInfoQuery = Regex("(?i)\\b(berita|informasi|artikel|resep|jadwal|lokasi|cuaca|sejarah|makna|pengertian|tutorial|lowongan|harga emas|saham)\\b")
+                    .containsMatchIn(lastUserText)
+                val forceMarket = (hasSearchVerb && !isInfoQuery) ||
+                        Regex("(?i)shopee|tokopedia|blibli|lazada|marketplace|jaket|koko|baju|sepatu|celana|kemeja|hoodie|tshirt|pakaian|kaos|polo|tas|dompet|power|charger|iphone|samsung|tablet|laptop|earphone|headphone|speaker|celengan|mantel|sandal|sendal|helm|kacamata|parfum|gamis|hijab|mukena|sarung|peci|topi|koper|kamera|mouse|keyboard|komputer|monitor|kulkas|blender|kompor|panci|sepeda|baterai|kabel|flashdisk").containsMatchIn(lastUserText)
                 val toolChoice: Any = if (forceMarket) JSONObject().put("type", "function").put("function", JSONObject().put("name", "market_search")) else "auto"
                 var payload = JSONObject()
                     .put("model", model)
@@ -2481,20 +2506,30 @@ class NativeChatActivity : AppCompatActivity() {
                                                 it.name.lowercase() == mp || it.label.equals(mp, true)
                                             }
                                         } ?: marketFromText
+                                        // Tidak menyebut marketplace -> cari di semua yang bisa dimuat.
+                                        val marketLabel = market?.label
+                                            ?: MarketSearch.LOADABLE_MARKETS.joinToString(", ") { it.label }
                                         if (cardRendered) {
                                             // Sudah ada kartu di giliran ini → jangan cari & render lagi
                                             "Saran produk sudah ditampilkan di kartu. Gunakan satu kartu saja."
                                         } else {
                                         val products = try {
-                                            MarketSearch.search(market, kw)
+                                            if (market != null) MarketSearch.search(market, kw)
+                                            else MarketSearch.searchMulti(kw)
                                         } catch (e: Exception) {
                                             emptyList()
                                         }
                                         if (products.isNotEmpty()) {
                                             shopeeFound = true
                                             cardRendered = true
+                                            // Langsung simpan ke Papan Hasil AI (tanpa perlu tap tombol).
+                                            val pinned = try {
+                                                PapanStore.pin(this@NativeChatActivity, products.toPapanCards(kw))
+                                            } catch (e: Exception) {
+                                                0
+                                            }
                                             val md = StringBuilder()
-                                                .append("🛒 **Saran Produk ").append(market.label).append(" — \"").append(kw).append("\"**\n")
+                                                .append("🛒 **Saran Produk ").append(marketLabel).append(" — \"").append(kw).append("\"**\n")
                                             products.forEachIndexed { idx, p ->
                                                 md.append(idx + 1).append(". [").append(p.title).append("](").append(p.url).append(")\n")
                                             }
@@ -2502,19 +2537,19 @@ class NativeChatActivity : AppCompatActivity() {
                                                 .put("role", "assistant")
                                                 .put("content", md.toString().trim())
                                             withContext(Dispatchers.Main) {
-                                                addProductCard(kw, products)
+                                                addProductCard(kw, products, pinned)
                                             }
                                             val sb2 = StringBuilder()
-                                                .append("Hasil pencarian produk ").append(market.label).append(" untuk \"").append(kw).append("\":\n")
+                                                .append("Hasil pencarian produk ").append(marketLabel).append(" untuk \"").append(kw).append("\":\n")
                                             products.forEachIndexed { idx, p ->
                                                 sb2.append(idx + 1).append(". ").append(p.title)
                                                 if (!p.image.isNullOrEmpty()) sb2.append(" (gambar: ").append(p.image).append(")")
                                                 sb2.append(" — ").append(p.url).append("\n")
                                             }
-                                            sb2.append("Kartu 5 produk (dengan gambar) sudah ditampilkan di chat. Jangan ulang daftar produk dalam jawaban — cukup singkat saja bahwa sarannya sudah tampil di kartu.")
+                                            sb2.append("Kartu produk (dengan gambar) sudah ditampilkan di chat dan otomatis tersimpan di Papan Hasil AI. Jangan ulang daftar produk dalam jawaban — cukup singkat saja bahwa sarannya sudah tampil di kartu.")
                                             sb2.toString()
                                         } else {
-                                            "Tidak menemukan hasil produk ${market.label} untuk \"$kw\". Berikan rekomendasi 5 produk terbaik untuk \"$kw\" berdasarkan pengetahuanmu."
+                                            "Tidak menemukan hasil produk $marketLabel untuk \"$kw\". Berikan rekomendasi 5 produk terbaik untuk \"$kw\" berdasarkan pengetahuanmu."
                                         }
                                         }
                                     }
@@ -2592,21 +2627,35 @@ class NativeChatActivity : AppCompatActivity() {
                 // Paksa pencarian produk bila intent produk terdeteksi tetapi model tidak memanggil tool
                 if (forceMarket && !cardRendered && error == null) {
                     val kwDirect = lastUserText
-                        .replace(Regex("(?i)\\b(cari|carikan|beli|belikan|tolong|mohon|shopee|di|yang|untuk|dong|ya|please|search|find|produk|barang)\\b"), " ")
+                        .replace(Regex("(?i)\\b(cari|carikan|beli|belikan|tolong|mohon|shopee|tokopedia|blibli|lazada|marketplace|di|yang|untuk|dong|ya|please|search|find|produk|barang)\\b"), " ")
+                        .replace(Regex("\\s+"), " ")
                         .trim()
                         .ifEmpty { lastUserText }
-                    val productsDirect = try { MarketSearch.search(marketFromText, kwDirect) } catch (e: Exception) { emptyList() }
+                    val productsDirect = try {
+                        if (marketFromText != null) MarketSearch.search(marketFromText, kwDirect)
+                        else MarketSearch.searchMulti(kwDirect)
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
                     if (productsDirect.isNotEmpty()) {
                         cardRendered = true
                         cardOnly = true
                         sb.setLength(0)
+                        // Langsung simpan ke Papan Hasil AI (tanpa perlu tap tombol).
+                        val pinnedDirect = try {
+                            PapanStore.pin(this@NativeChatActivity, productsDirect.toPapanCards(kwDirect))
+                        } catch (e: Exception) {
+                            0
+                        }
+                        val labelDirect = marketFromText?.label
+                            ?: MarketSearch.LOADABLE_MARKETS.joinToString(", ") { it.label }
                         val mdDirect = StringBuilder()
-                            .append("🛒 **Saran Produk ").append(marketFromText.label).append(" - \"").append(kwDirect).append("\"**\n")
+                            .append("🛒 **Saran Produk ").append(labelDirect).append(" - \"").append(kwDirect).append("\"**\n")
                         productsDirect.forEachIndexed { idx, p ->
                             mdDirect.append(idx + 1).append(". [").append(p.title).append("](").append(p.url).append(")\n")
                         }
                         shopeeHistoryMsg = JSONObject().put("role", "assistant").put("content", mdDirect.toString().trim())
-                        withContext(Dispatchers.Main) { addProductCard(kwDirect, productsDirect) }
+                        withContext(Dispatchers.Main) { addProductCard(kwDirect, productsDirect, pinnedDirect) }
                     }
                 }
             } catch (e: Exception) {

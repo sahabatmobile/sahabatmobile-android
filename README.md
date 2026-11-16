@@ -70,6 +70,12 @@ Aplikasi AI Android untuk pelanggan SahabatMobile. Semua fitur bekerja dengan sa
 ### 16. Backup & Export 💾
 - Ekspor semua data (pref + riwayat) ke file JSON (SAF) & pulihkan kembali — menu Profil.
 
+### 17. Papan Hasil AI 📌
+- Tombol **"Pin ke Papan"** di setiap kartu saran produk Shopee di chat → produk disimpan ke papan tersendiri.
+- Anti-duplikat (URL sama tidak masuk dua kali, query diabaikan), kartu terbaru di atas, maksimal 60 kartu.
+- Tampilkan gambar, judul, rating toko (★), dan kata kunci pencarian; bisa dibuka langsung di app Shopee, dihapus satu per satu, atau dibersihkan semua.
+- Dibuka dari drawer **"Papan Hasil AI"** (dengan jumlah kartu) atau menu ⋮ → Papan Hasil AI.
+
 ## 🛠 Cara Build
 
 **Kebutuhan:** JDK 17 · Android SDK 36 · Gradle 8.14 (sudah termasuk wrapper)
@@ -111,6 +117,9 @@ APK debug: `app/build/outputs/apk/debug/app-debug.apk`
     │   ├── VoiceAiClient.kt              # ASR + TTS LongCat untuk voice call
     │   ├── SolutionCameraActivity.kt     # Kamera Solusi 📷
     │   ├── TemplateActivity.kt           # Template Kerja 📝
+    │   ├── PapanActivity.kt              # Papan Hasil AI 📌
+    │   ├── PapanStore.kt                 # Simpan kartu papan (pin/anti-duplikat)
+    │   ├── ShopeeSearch.kt               # Cari produk Shopee (Bing/DuckDuckGo)
     │   ├── AiTools.kt                    # Helper AI multimodal (gambar + teks)
     │   ├── WhatsAppReplyActivity.kt      # Saran balasan WA (manual)
     │   ├── WhatsAppAiClient.kt           # AI client untuk WA (persona, auto-translate)

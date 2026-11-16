@@ -48,6 +48,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_papan"
+        android:title="@string/papan_title"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_clear_chat"
         android:title="@string/clear_chat"
         app:showAsAction="never" />

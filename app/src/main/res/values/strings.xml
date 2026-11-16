@@ -285,4 +285,23 @@
     <string name="example_4">🫂 Aku lagi stres dan capek, temani aku sebentar</string>
     <string name="example_5">📋 Cek catatan kesehatan saya 7 hari terakhir</string>
     <string name="model_one_place_hint">Model AI diubah dari tab "Pengaturan" di layar Profil &amp; Pengaturan.</string>
+
+    <!-- Papan Hasil AI -->
+    <string name="papan_title">Papan Hasil AI</string>
+    <string name="papan_subtitle">Hasil pencarian AI yang kamu pin</string>
+    <string name="papan_empty">Papan masih kosong.\nCari produk di chat, lalu tap \"Pin ke Papan\".</string>
+    <string name="papan_pin">Pin ke Papan</string>
+    <string name="papan_pin_done">Tersimpan di papan</string>
+    <string name="papan_rating">Rating %1$s</string>
+    <string name="papan_keyword">Kata kunci: %1$s</string>
+    <string name="papan_pinned">%1$d produk ditambahkan ke papan</string>
+    <string name="papan_pin_dup">Semua produk ini sudah ada di papan</string>
+    <string name="papan_open_shopee">Buka di Shopee</string>
+    <string name="papan_remove">Hapus</string>
+    <string name="papan_clear">Bersihkan</string>
+    <string name="papan_clear_confirm">Hapus semua kartu dari papan?</string>
+    <string name="papan_cleared">Papan dikosongkan</string>
+    <string name="papan_removed">Dikeluarkan dari papan</string>
+    <string name="papan_count">%1$d kartu tersimpan</string>
+    <string name="papan_tap_hint">Tap produk untuk buka di Shopee</string>
 </resources>

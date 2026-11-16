@@ -337,6 +337,10 @@ class NativeChatActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(Gravity.START)
             startActivity(Intent(this, ProfileActivity::class.java))
         }
+        findViewById<Button>(R.id.btnDrawerPapan).setOnClickListener {
+            drawerLayout.closeDrawer(Gravity.START)
+            startActivity(Intent(this, PapanActivity::class.java))
+        }
         findViewById<Button>(R.id.btnDrawerTasks).setOnClickListener {
             drawerLayout.closeDrawer(Gravity.START)
             startActivity(
@@ -347,6 +351,10 @@ class NativeChatActivity : AppCompatActivity() {
         drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
             override fun onDrawerOpened(drawerView: View) {
                 populateDrawer()
+                val pinned = PapanStore.count(this@NativeChatActivity)
+                findViewById<Button>(R.id.btnDrawerPapan).text =
+                    if (pinned > 0) "${getString(R.string.papan_title)} ($pinned)"
+                    else getString(R.string.papan_title)
             }
         })
 
@@ -1035,6 +1043,17 @@ class NativeChatActivity : AppCompatActivity() {
         return tv
     }
 
+    /** Konversi hasil pencarian Shopee menjadi kartu untuk Papan Hasil AI. */
+    private fun List<ShopeeProduct>.toPapanCards(keyword: String): List<PapanStore.Card> = map { p ->
+        PapanStore.Card(
+            title = p.title,
+            url = p.url,
+            image = p.image,
+            rating = p.rating ?: 0.0,
+            keyword = keyword
+        )
+    }
+
     /**
      * Kartu saran produk Shopee — tampil di chat setelah tool shopee_search.
      * Tap salah satu produk → langsung dibuka di app Shopee.
@@ -1108,14 +1127,40 @@ class NativeChatActivity : AppCompatActivity() {
             card.addView(itemRow)
         }
 
-        val footer = TextView(this)
-        footer.text = "Tap produk untuk buka di app Shopee"
-        footer.textSize = 10.5f
-        footer.setTextColor(getColor(R.color.textSecondary))
+        // Footer: petunjuk + tombol simpan ke Papan Hasil AI
+        val footerRow = LinearLayout(this)
+        footerRow.orientation = LinearLayout.HORIZONTAL
+        footerRow.gravity = Gravity.CENTER_VERTICAL
         val fp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         fp.topMargin = dp(8)
-        footer.layoutParams = fp
-        card.addView(footer)
+        footerRow.layoutParams = fp
+
+        val footer = TextView(this)
+        footer.text = getString(R.string.papan_tap_hint)
+        footer.textSize = 10.5f
+        footer.setTextColor(getColor(R.color.textSecondary))
+        footer.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        footerRow.addView(footer)
+
+        val pin = TextView(this)
+        pin.text = getString(R.string.papan_pin)
+        pin.textSize = 11.5f
+        pin.setTextColor(getColor(R.color.primary))
+        pin.setTypeface(null, android.graphics.Typeface.BOLD)
+        pin.background = getDrawable(R.drawable.bg_chip)
+        pin.setPadding(dp(10), dp(6), dp(10), dp(6))
+        pin.isClickable = true
+        pin.setOnClickListener {
+            val n = PapanStore.pin(this, products.toPapanCards(keyword))
+            val msg = if (n > 0) getString(R.string.papan_pinned, n) else getString(R.string.papan_pin_dup)
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            if (n > 0) {
+                pin.text = getString(R.string.papan_pin_done)
+                pin.setTextColor(getColor(R.color.successText))
+            }
+        }
+        footerRow.addView(pin)
+        card.addView(footerRow)
 
         // Bungkus dengan avatar & label seperti bubble AI
         val row = LinearLayout(this)
@@ -2442,16 +2487,6 @@ class NativeChatActivity : AppCompatActivity() {
                                             withContext(Dispatchers.Main) {
                                                 addProductCard(kw, products)
                                             }
-                                            try {
-                                                val arr = JSONArray()
-                                                products.forEach { p ->
-                                                    arr.put(JSONObject()
-.put("title", p.title)
-.put("url", p.url)
-                                                        .put("image", p.image ?: ""))
-                                                }
-                                                getSharedPreferences("sm_prefs", MODE_PRIVATE).edit().putString("papan_cards", arr.toString()).apply()
-                                            } catch (e: Exception) {}
                                             val sb2 = StringBuilder()
                                                 .append("Hasil pencarian produk Shopee untuk \"").append(kw).append("\":\n")
                                             products.forEachIndexed { idx, p ->
@@ -2554,13 +2589,6 @@ class NativeChatActivity : AppCompatActivity() {
                             mdDirect.append(idx + 1).append(". [").append(p.title).append("](").append(p.url).append(")\n")
                         }
                         shopeeHistoryMsg = JSONObject().put("role", "assistant").put("content", mdDirect.toString().trim())
-                        try {
-                            val arrD = JSONArray()
-                            productsDirect.forEach { p ->
-                                arrD.put(JSONObject().put("title", p.title).put("url", p.url).put("image", p.image ?: ""))
-                            }
-                            getSharedPreferences("sm_prefs", MODE_PRIVATE).edit().putString("papan_cards", arrD.toString()).apply()
-                        } catch (e: Exception) {}
                         withContext(Dispatchers.Main) { addProductCard(kwDirect, productsDirect) }
                     }
                 }
@@ -2867,6 +2895,10 @@ class NativeChatActivity : AppCompatActivity() {
         }
         R.id.action_whatsapp_reply -> {
             startActivity(Intent(this, WhatsAppReplyActivity::class.java))
+            true
+        }
+        R.id.action_papan -> {
+            startActivity(Intent(this, PapanActivity::class.java))
             true
         }
         R.id.action_clear_chat -> {

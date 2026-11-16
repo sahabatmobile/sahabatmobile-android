@@ -1045,6 +1045,7 @@ class NativeChatActivity : AppCompatActivity() {
 
         /** Konversi hasil pencarian produk menjadi kartu untuk Papan Hasil AI. */
     private fun List<MarketProduct>.toPapanCards(keyword: String): List<PapanStore.Card> = map { p ->
+        val hasInfo = p.price.isNotEmpty() || p.sold > 0 || (p.rating ?: 0.0) > 0.0
         PapanStore.Card(
             title = p.title,
             url = p.url,
@@ -1053,7 +1054,9 @@ class NativeChatActivity : AppCompatActivity() {
             sold = p.sold,
             price = p.price,
             keyword = keyword,
-            market = p.market.name.lowercase()
+            market = p.market.name.lowercase(),
+            // Sudah dicek saat pencarian -> papan tidak perlu fetch ulang.
+            checked = hasInfo
         )
     }
 
@@ -1133,6 +1136,31 @@ class NativeChatActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             infoCol.addView(title)
+
+            // Harga + rating + terjual (hasil pembacaan halaman produk).
+            if (p.price.isNotEmpty()) {
+                val priceTv = TextView(this)
+                priceTv.text = p.price
+                priceTv.textSize = 12f
+                priceTv.setTypeface(null, android.graphics.Typeface.BOLD)
+                priceTv.setTextColor(getColor(R.color.primary))
+                infoCol.addView(priceTv)
+            }
+            val metaParts = mutableListOf<String>()
+            if ((p.rating ?: 0.0) > 0) {
+                metaParts.add(
+                    "★ " + String.format(java.util.Locale.getDefault(), "%.1f", p.rating)
+                        .replace('.', ',')
+                )
+            }
+            if (p.sold > 0) metaParts.add("Terjual " + MarketSearch.formatCount(p.sold))
+            if (metaParts.isNotEmpty()) {
+                val meta = TextView(this)
+                meta.text = metaParts.joinToString("  ·  ")
+                meta.textSize = 10.5f
+                meta.setTextColor(getColor(R.color.textSecondary))
+                infoCol.addView(meta)
+            }
             itemRow.addView(infoCol)
 
             val arrow = TextView(this)
@@ -2514,8 +2542,9 @@ class NativeChatActivity : AppCompatActivity() {
                                             "Saran produk sudah ditampilkan di kartu. Gunakan satu kartu saja."
                                         } else {
                                         val products = try {
-                                            if (market != null) MarketSearch.search(market, kw)
+                                            val raw = if (market != null) MarketSearch.search(market, kw)
                                             else MarketSearch.searchMulti(kw)
+                                            MarketSearch.sortByQuality(MarketSearch.enrich(raw))
                                         } catch (e: Exception) {
                                             emptyList()
                                         }
@@ -2632,8 +2661,9 @@ class NativeChatActivity : AppCompatActivity() {
                         .trim()
                         .ifEmpty { lastUserText }
                     val productsDirect = try {
-                        if (marketFromText != null) MarketSearch.search(marketFromText, kwDirect)
+                        val raw = if (marketFromText != null) MarketSearch.search(marketFromText, kwDirect)
                         else MarketSearch.searchMulti(kwDirect)
+                        MarketSearch.sortByQuality(MarketSearch.enrich(raw))
                     } catch (e: Exception) {
                         emptyList()
                     }

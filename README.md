@@ -82,7 +82,9 @@ Aplikasi AI Android untuk pelanggan SahabatMobile. Semua fitur bekerja dengan sa
 
 ### 18. Pencarian Multi-Marketplace 🛒
 - Tool `market_search` otomatis terpakai saat pengguna minta dicarikan produk (default **Shopee**, bisa menyebut **Tokopedia**, **Blibli**, atau **Lazada**).
-- Kartu produk di chat menampilkan nama marketplace dan membuka produk di app marketplace-nya.
+- Kartu produk di chat menampilkan nama marketplace, **harga, rating, dan jumlah terjual** (dibaca langsung dari halaman produk), terurut dari rating/penjualan terbaik, dan membuka produk di app marketplace-nya.
+- Hasil pencarian **langsung tersimpan otomatis** ke Papan Hasil AI (tanpa perlu tap tombol).
+- Produk yang ternyata mati/stok habis langsung dibuang dari hasil pencarian.
 - Data produk diambil lewat HTML halaman produk (tanpa login): **Tokopedia** (harga, rating, terjual, stok), **Lazada** (harga, stok), **Shopee** (stok; harga/rating via render halaman), **Blibli** (data terbatas — halaman dikunci Cloudflare).
 - Produk yang sudah dihapus (404) / stok habis otomatis disembunyikan dari Papan Hasil AI.
 

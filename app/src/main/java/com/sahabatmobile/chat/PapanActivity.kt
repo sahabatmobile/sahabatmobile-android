@@ -601,6 +601,26 @@ class PapanActivity : AppCompatActivity() {
         wv.settings.javaScriptEnabled = true
         wv.settings.domStorageEnabled = true
         wv.settings.userAgentString = PRICE_UA
+        val wrap = LinearLayout(this)
+        wrap.orientation = LinearLayout.VERTICAL
+        wrap.setPadding(dp(16), dp(8), dp(16), 0)
+
+        val hint = TextView(this)
+        hint.text = getString(R.string.papan_verify_step)
+        hint.textSize = 11.5f
+        hint.setTextColor(getColor(R.color.textSecondary))
+        wrap.addView(hint)
+
+        val login = TextView(this)
+        login.text = getString(R.string.papan_verify_login)
+        login.textSize = 12f
+        login.setTypeface(null, android.graphics.Typeface.BOLD)
+        login.setTextColor(getColor(R.color.primary))
+        login.setPadding(0, dp(8), 0, 0)
+        login.isClickable = true
+        login.setOnClickListener { wv.loadUrl(LOGIN_URL) }
+        wrap.addView(login)
+
         val box = android.widget.FrameLayout(this)
         box.addView(
             wv,
@@ -609,10 +629,18 @@ class PapanActivity : AppCompatActivity() {
                 (resources.displayMetrics.heightPixels * 3 / 4)
             )
         )
-        wv.loadUrl(HOME_URL)
+        val boxParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        boxParams.topMargin = dp(8)
+        wrap.addView(box, boxParams)
+
+        // Langsung ke produk pertama yang harganya belum ketemu (sekalian verifikasi).
+        wv.loadUrl(pendingUrls().firstOrNull() ?: HOME_URL)
         AlertDialog.Builder(this)
             .setTitle(R.string.papan_verify_title)
-            .setView(box)
+            .setView(wrap)
             .setPositiveButton(R.string.papan_verify_done) { _, _ -> }
             .setOnDismissListener {
                 wv.stopLoading()
@@ -652,6 +680,7 @@ class PapanActivity : AppCompatActivity() {
         const val PAUSE_MS = 30 * 60 * 1000L
         const val RETRY_PRICE_MS = 6 * 60 * 60 * 1000L
         const val HOME_URL = "https://shopee.co.id/"
+        const val LOGIN_URL = "https://shopee.co.id/buyer/login"
         const val JS_PRICE = """(function(){try{var out='',flat='',r='',s='';var b=document.body?document.body.cloneNode(true):null;if(b){var sc=b.querySelectorAll('script,style,noscript');for(var i=0;i<sc.length;i++){sc[i].parentNode.removeChild(sc[i]);}var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null),n;while(n=w.nextNode()){var t=(n.nodeValue||'').replace(/\s+/g,'');if(/^Rp\d{3,}$/.test(t)){out=t;break;}}flat=(b.textContent||'').replace(/\s+/g,' ');if(!out){var m=flat.match(/Rp(\d{4,})/);if(m){out='Rp'+m[1];}}if(out){var v=parseInt(out.replace('Rp',''),10);if(!(v>=1000)){out='';}}var head=flat.substring(0,250);var rm=head.match(/(\d[.,]\d{1,2})\s*\/\s*5/)||head.match(/(\d[.,]\d{1,2})\s*(?:Penilaian|rating|Ulasan)/i);if(rm){var rv=parseFloat(rm[1].replace(',','.'));if(rv>0&&rv<=5){r=String(rv);}}var sm=flat.match(/Terjual\s*([\d.]+(?:[.,]\d+)?)\s*(rb|ribu|jt|juta)?/i)||flat.match(/([\d.]+(?:[.,]\d+)?)\s*(rb|ribu|jt|juta)?\s*Terjual/i);if(sm){var num=parseFloat(sm[1].replace(/\./g,'').replace(',','.'));var mul=1;if(sm[2]){if(/^(rb|ribu)$/i.test(sm[2])){mul=1000;}else if(/^(jt|juta)$/i.test(sm[2])){mul=1000000;}}if(num>0){s=String(Math.round(num*mul));}}}return JSON.stringify({p:out,r:r,s:s,t:flat.substring(0,200)});}catch(err){return JSON.stringify({p:'',r:'',s:'',t:''});}})()"""
     }
 }

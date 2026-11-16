@@ -103,6 +103,47 @@ object MarketSearch {
         return out
     }
 
+    /**
+     * Lengkapi harga/rating/terjual tiap produk dengan membaca halaman produknya
+     * (1 fetch per produk). Produk yang ternyata mati/stok habis dibuang dari hasil.
+     */
+    fun enrich(products: List<MarketProduct>, maxItems: Int = 6): List<MarketProduct> {
+        val out = mutableListOf<MarketProduct>()
+        for (p in products.take(maxItems)) {
+            val hasInfo = p.price.isNotEmpty() || p.sold > 0 || (p.rating ?: 0.0) > 0.0
+            if (hasInfo || p.market == Market.BLIBLI) {
+                out.add(p)
+                continue
+            }
+            val info = try {
+                Thread.sleep(300)
+                productInfo(p.market, p.url)
+            } catch (e: Exception) {
+                ProductInfo()
+            }
+            when (info.status) {
+                STATUS_DEAD, STATUS_SOLD_OUT -> android.util.Log.i(
+                    TAG, "buang (${info.status}): ${p.url.takeLast(45)}"
+                )
+                else -> out.add(
+                    p.copy(
+                        price = info.price,
+                        rating = if (info.rating > 0) info.rating else p.rating,
+                        sold = if (info.sold > 0) info.sold else p.sold
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    /** Urut produk: rating tertinggi, lalu penjualan terbanyak. */
+    fun sortByQuality(products: List<MarketProduct>): List<MarketProduct> =
+        products.sortedWith(
+            compareByDescending<MarketProduct> { it.rating ?: 0.0 }
+                .thenByDescending { it.sold }
+        )
+
     fun search(market: Market, keyword: String, limit: Int = 5): List<MarketProduct> {
         if (keyword.isBlank()) return emptyList()
         val cacheKey = "${market.name}|${keyword.trim().lowercase()}"

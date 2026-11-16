@@ -309,6 +309,8 @@
     <string name="papan_show_all">%1$d kartu disembunyikan oleh filter rating — Tampilkan semua</string>
     <string name="papan_verify_hint">Shopee minta verifikasi untuk ambil harga &amp; rating — tap di sini</string>
     <string name="papan_verify_title">Verifikasi Shopee</string>
+    <string name="papan_verify_step">Selesaikan verifikasi yang muncul di halaman Shopee, lalu tap Selesai. Harga &amp; rating produk akan otomatis terisi.</string>
+    <string name="papan_verify_login">Masuk akun Shopee (agar harga &amp; rating tidak diblokir)</string>
     <string name="papan_verify_done">Selesai</string>
     <string name="papan_tap_hint">Tap produk untuk buka di Shopee</string>
     <string name="market_tap_hint">Tap produk untuk buka di %1$s</string>

@@ -28,7 +28,11 @@ object PapanStore {
         val rating: Double = 0.0,
         val keyword: String = "",
         val type: String = TYPE_SHOPEE,
-        val ts: Long = System.currentTimeMillis()
+        val ts: Long = System.currentTimeMillis(),
+        /** Harga siap tampil, mis. "Rp180.000". Kosong = belum diambil, "-" = tidak tersedia. */
+        val price: String = "",
+        /** Waktu pengambilan harga terakhir (untuk mencoba lagi setelah beberapa jam). */
+        val priceTs: Long = 0L
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("type", type)
@@ -38,6 +42,8 @@ object PapanStore {
             .put("rating", rating)
             .put("keyword", keyword)
             .put("ts", ts)
+            .put("price", price)
+            .put("priceTs", priceTs)
 
         companion object {
             /** Kompatibel dengan data lama (hanya title/url/image). */
@@ -48,7 +54,9 @@ object PapanStore {
                 rating = o.optDouble("rating", 0.0).let { if (it.isNaN()) 0.0 else it },
                 keyword = o.optString("keyword"),
                 type = o.optString("type", TYPE_SHOPEE),
-                ts = o.optLong("ts")
+                ts = o.optLong("ts"),
+                price = o.optString("price"),
+                priceTs = o.optLong("priceTs")
             )
         }
     }
@@ -96,6 +104,22 @@ object PapanStore {
         val key = keyOf(url)
         val next = load(context).filterNot { keyOf(it.url) == key }
         save(context, next)
+    }
+
+    /** Simpan harga hasil render halaman produk ("-" = harga tidak ketemu). */
+    fun setPrice(context: Context, url: String, price: String) {
+        val key = keyOf(url)
+        val cards = load(context)
+        var changed = false
+        val next = cards.map {
+            if (keyOf(it.url) == key && (it.price != price || it.priceTs == 0L)) {
+                changed = true
+                it.copy(price = price, priceTs = System.currentTimeMillis())
+            } else {
+                it
+            }
+        }
+        if (changed) save(context, next)
     }
 
     fun clear(context: Context) {

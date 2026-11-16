@@ -2,8 +2,15 @@ package com.sahabatmobile.chat
 
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -21,6 +28,9 @@ import java.util.Locale
 /**
  * Papan Hasil AI — daftar kartu yang di-pin pengguna dari chat.
  * Isi disimpan lewat [PapanStore]; layar ini hanya menampilkan, membuka, dan menghapus kartu.
+ *
+ * Harga Shopee tidak ada di HTML (dirender via JS), jadi harga diambil dengan memuat
+ * halaman produk di WebView tersembunyi lalu membaca teks halaman.
  */
 class PapanActivity : AppCompatActivity() {
 
@@ -30,6 +40,14 @@ class PapanActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val images = mutableMapOf<String, Bitmap?>()
+
+    private var priceWeb: WebView? = null
+    private var priceUrl: String? = null
+    private var priceTries = 0
+    private var pricePageError = false
+    private val priceQueue = ArrayDeque<String>()
+    private val handler = Handler(Looper.getMainLooper())
+    private val pollPriceRunnable = Runnable { pollPrice() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,9 +61,18 @@ class PapanActivity : AppCompatActivity() {
         btnClear.setOnClickListener { confirmClear() }
 
         loadBoard()
+        preparePriceWeb()
+        startPrices()
     }
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        priceWeb?.let {
+            it.stopLoading()
+            (it.parent as? ViewGroup)?.removeView(it)
+            it.destroy()
+        }
+        priceWeb = null
         scope.cancel()
         super.onDestroy()
     }
@@ -65,7 +92,7 @@ class PapanActivity : AppCompatActivity() {
             llBoard.addView(emptyView())
             return
         }
-        cards.forEach { addCard(it) }
+        cards.forEachIndexed { index, card -> addCard(card, index) }
     }
 
     private fun emptyView(): TextView {
@@ -82,7 +109,7 @@ class PapanActivity : AppCompatActivity() {
         return tv
     }
 
-    private fun addCard(card: PapanStore.Card) {
+    private fun addCard(card: PapanStore.Card, index: Int = 0) {
         val box = LinearLayout(this)
         box.orientation = LinearLayout.VERTICAL
         box.background = getDrawable(R.drawable.bg_card)
@@ -120,6 +147,22 @@ class PapanActivity : AppCompatActivity() {
         title.maxLines = 2
         title.ellipsize = TextUtils.TruncateAt.END
         column.addView(title)
+
+        val isProduct = Regex("-i\\.\\d+\\.\\d+").containsMatchIn(card.url)
+        val price = TextView(this)
+        price.tag = "price:${card.url}"
+        price.textSize = 14f
+        price.setTypeface(null, android.graphics.Typeface.BOLD)
+        val hasPrice = card.price.isNotEmpty() && card.price != "-"
+        when {
+            hasPrice -> price.text = card.price
+            card.price.isEmpty() && isProduct && index < MAX_FETCH ->
+                price.text = getString(R.string.papan_price_loading)
+            else -> price.visibility = View.GONE
+        }
+        price.setTextColor(getColor(if (hasPrice) R.color.primary else R.color.textSecondary))
+        price.setPadding(0, dp(2), 0, 0)
+        column.addView(price)
 
         val meta = LinearLayout(this)
         meta.orientation = LinearLayout.HORIZONTAL
@@ -208,6 +251,127 @@ class PapanActivity : AppCompatActivity() {
         }
     }
 
+    private fun preparePriceWeb() {
+        val wv = WebView(this)
+        wv.settings.javaScriptEnabled = true
+        wv.settings.domStorageEnabled = true
+        wv.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        wv.settings.userAgentString = PRICE_UA
+        wv.settings.javaScriptCanOpenWindowsAutomatically = false
+        wv.settings.setSupportMultipleWindows(false)
+        wv.alpha = 0f
+        wv.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                pricePageError = false
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?,
+                error: android.webkit.WebResourceError?
+            ) {
+                if (request?.isForMainFrame == true) pricePageError = true
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                handler.removeCallbacks(pollPriceRunnable)
+                handler.postDelayed(pollPriceRunnable, 1200)
+            }
+        }
+        findViewById<LinearLayout>(R.id.rootPapan).addView(
+            wv,
+            LinearLayout.LayoutParams(dp(1), dp(1))
+        )
+        priceWeb = wv
+    }
+
+    /** Antrekan kartu yang harganya belum diketahui. */
+    private fun startPrices() {
+        if (priceWeb == null || priceUrl != null) return
+        val now = System.currentTimeMillis()
+        val pending = PapanStore.load(this)
+            .filter {
+                val isProduct = Regex("-i\\.\\d+\\.\\d+").containsMatchIn(it.url)
+                if (!isProduct) return@filter false
+                when (it.price) {
+                    "" -> true
+                    "-" -> now - it.priceTs > RETRY_PRICE_MS
+                    else -> false
+                }
+            }
+            .take(MAX_FETCH)
+        priceQueue.clear()
+        priceQueue.addAll(pending.map { it.url })
+        if (priceQueue.isNotEmpty()) nextPrice()
+    }
+
+    private fun nextPrice() {
+        val url = priceQueue.removeFirstOrNull()
+        if (url == null) {
+            priceUrl = null
+            return
+        }
+        val wv = priceWeb ?: return
+        priceUrl = url
+        priceTries = 0
+        pricePageError = false
+        handler.removeCallbacks(pollPriceRunnable)
+        wv.stopLoading()
+        wv.loadUrl(url)
+    }
+
+    private fun pollPrice() {
+        val url = priceUrl ?: return
+        val wv = priceWeb ?: return
+        priceTries++
+        wv.evaluateJavascript(JS_PRICE) { raw ->
+            if (priceUrl != url) return@evaluateJavascript
+            val res = parseJsPrice(raw)
+            val price = res.first
+            if (price.isNotEmpty()) {
+                PapanStore.setPrice(this, url, price)
+                showPrice(url, price)
+                priceUrl = null
+                handler.postDelayed({ nextPrice() }, 600)
+            } else if (priceTries < MAX_TRIES) {
+                handler.postDelayed(pollPriceRunnable, 1800)
+            } else {
+                android.util.Log.w(TAG, "harga tak ketemu: $url | ${res.second}")
+                // Halaman terbuka normal tapi harga tetap tak ketemu -> coba lagi setelah beberapa jam.
+                if (!pricePageError) PapanStore.setPrice(this, url, "-")
+                hidePrice(url)
+                priceUrl = null
+                nextPrice()
+            }
+        }
+    }
+
+    private fun showPrice(url: String, price: String) {
+        val tv = llBoard.findViewWithTag<TextView>("price:$url") ?: return
+        tv.text = price
+        tv.setTextColor(getColor(R.color.primary))
+        tv.visibility = View.VISIBLE
+    }
+
+    private fun hidePrice(url: String) {
+        val tv = llBoard.findViewWithTag<TextView>("price:$url") ?: return
+        tv.text = ""
+        tv.visibility = View.GONE
+    }
+
+    /** Hasil evaluateJavascript: JSON {"p": harga, "t": cuplikan teks halaman}. */
+    private fun parseJsPrice(raw: String?): Pair<String, String> {
+        if (raw.isNullOrBlank() || raw == "null") return "" to ""
+        return try {
+            val o = org.json.JSONObject(raw)
+            val price = o.optString("p").replace(Regex("\\s+"), "").take(24)
+            val text = o.optString("t").replace(Regex("\\s+"), " ").take(200)
+            price to text
+        } catch (e: Exception) {
+            "" to ""
+        }
+    }
+
     private fun confirmClear() {
         if (PapanStore.count(this) == 0) return
         AlertDialog.Builder(this)
@@ -223,4 +387,14 @@ class PapanActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        const val TAG = "SM_PAPAN"
+        const val PRICE_UA =
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
+        const val MAX_FETCH = 12
+        const val MAX_TRIES = 10
+        const val RETRY_PRICE_MS = 6 * 60 * 60 * 1000L
+        const val JS_PRICE = """(function(){try{var b=document.body.cloneNode(true);var s=b.querySelectorAll('script,style,noscript');for(var i=0;i<s.length;i++){s[i].parentNode.removeChild(s[i]);}var out='';var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null);var n;while(n=w.nextNode()){var t=(n.nodeValue||'').replace(/\s+/g,'');if(/^Rp\d{3,}$/.test(t)){out=t;break;}}if(!out){var all=(b.textContent||'').replace(/\s+/g,'');var m=all.match(/Rp(\d{4,})/);if(m){out='Rp'+m[1];}}if(out){var v=parseInt(out.replace('Rp',''),10);if(!(v>=1000)){out='';}}return JSON.stringify({p:out,t:(b.textContent||'').substring(0,400)});}catch(e){return JSON.stringify({p:'',t:''});}})()"""
+    }
 }

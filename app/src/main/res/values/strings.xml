@@ -304,5 +304,10 @@
     <string name="papan_removed">Dikeluarkan dari papan</string>
     <string name="papan_count">%1$d kartu tersimpan</string>
     <string name="papan_price_loading">Memuat harga...</string>
+    <string name="papan_sold">Terjual %1$s</string>
+    <string name="papan_show_all">%1$d kartu disembunyikan oleh filter rating — Tampilkan semua</string>
+    <string name="papan_verify_hint">Shopee minta verifikasi untuk ambil harga &amp; rating — tap di sini</string>
+    <string name="papan_verify_title">Verifikasi Shopee</string>
+    <string name="papan_verify_done">Selesai</string>
     <string name="papan_tap_hint">Tap produk untuk buka di Shopee</string>
 </resources>

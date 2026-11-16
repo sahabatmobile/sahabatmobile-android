@@ -36,7 +36,9 @@ object PapanStore {
         /** true = produk kosong / habis / halamannya tidak ada -> disembunyikan dari papan. */
         val empty: Boolean = false,
         /** true = halaman produk sudah pernah dicek (harga + status stok). */
-        val checked: Boolean = false
+        val checked: Boolean = false,
+        /** Jumlah terjual dari halaman produk (0 = belum diketahui). */
+        val sold: Int = 0
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("type", type)
@@ -50,6 +52,7 @@ object PapanStore {
             .put("priceTs", priceTs)
             .put("empty", empty)
             .put("checked", checked)
+            .put("sold", sold)
 
         companion object {
             /** Kompatibel dengan data lama (hanya title/url/image). */
@@ -64,7 +67,8 @@ object PapanStore {
                 price = o.optString("price"),
                 priceTs = o.optLong("priceTs"),
                 empty = o.optBoolean("empty", false),
-                checked = o.optBoolean("checked", false)
+                checked = o.optBoolean("checked", false),
+                sold = o.optInt("sold")
             )
         }
     }
@@ -158,8 +162,8 @@ object PapanStore {
         save(context, next)
     }
 
-    /** Simpan harga hasil render halaman produk ("-" = harga tidak ketemu). */
-    fun setPrice(context: Context, url: String, price: String) {
+    /** Simpan hasil render halaman produk: harga ("-" = tidak ketemu), rating, jumlah terjual. */
+    fun setInfo(context: Context, url: String, price: String, rating: Double = 0.0, sold: Int = 0) {
         val key = keyOf(url)
         val cards = load(context)
         var changed = false
@@ -171,9 +175,17 @@ object PapanStore {
                 } else {
                     if (price.isEmpty()) "-" else price
                 }
-                if (it.price != keep || !it.checked) {
+                val keepRating = if (rating > 0.0) rating else it.rating
+                val keepSold = if (sold > 0) sold else it.sold
+                if (it.price != keep || it.rating != keepRating || it.sold != keepSold || !it.checked) {
                     changed = true
-                    it.copy(price = keep, priceTs = System.currentTimeMillis(), checked = true)
+                    it.copy(
+                        price = keep,
+                        priceTs = System.currentTimeMillis(),
+                        checked = true,
+                        rating = keepRating,
+                        sold = keepSold
+                    )
                 } else {
                     it
                 }

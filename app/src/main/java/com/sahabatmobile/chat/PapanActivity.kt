@@ -46,6 +46,7 @@ class PapanActivity : AppCompatActivity() {
     private val images = mutableMapOf<String, Bitmap?>()
 
     private var checkRunning = false
+    private var showAll = false
 
     private var priceWeb: WebView? = null
     private var priceUrl: String? = null
@@ -90,20 +91,73 @@ class PapanActivity : AppCompatActivity() {
     private fun loadBoard() {
         llBoard.removeAllViews()
         pendingSet = pendingUrls().toSet()
-        val cards = PapanStore.loadVisible(this)
+        val all = PapanStore.loadVisible(this)
+        val kept = applyFilter(all)
 
-        tvSubtitle.text = if (cards.isEmpty()) {
+        tvSubtitle.text = if (all.isEmpty()) {
             getString(R.string.papan_subtitle)
         } else {
-            getString(R.string.papan_count, cards.size)
+            getString(R.string.papan_count, all.size)
         }
-        btnClear.visibility = if (cards.isEmpty()) View.GONE else View.VISIBLE
+        btnClear.visibility = if (all.isEmpty()) View.GONE else View.VISIBLE
 
-        if (cards.isEmpty()) {
+        val hint = findViewById<TextView>(R.id.tvVerifyHint)
+        if (all.isNotEmpty() && System.currentTimeMillis() < pauseUntil()) {
+            hint.visibility = View.VISIBLE
+            hint.setOnClickListener { openVerify() }
+        } else {
+            hint.visibility = View.GONE
+        }
+
+        if (kept.isEmpty()) {
             llBoard.addView(emptyView())
             return
         }
-        cards.forEach { addCard(it) }
+        kept.forEach { addCard(it) }
+        val hidden = all.size - kept.size
+        if (hidden > 0) llBoard.addView(hiddenView(hidden))
+    }
+
+    /**
+     * Filter kualitas produk — nilai rating diambil dari halaman produk Shopee.
+     * Ambil tier terbaik yang tersedia: 4.9 -> 4.8 -> 4.7 (minimum).
+     * Produk dengan penjualan terbanyak tetap tampil walau ratingnya di bawah tier,
+     * dan produk yang ratingnya belum diketahui tidak dibuang.
+     */
+    private fun applyFilter(cards: List<PapanStore.Card>): List<PapanStore.Card> {
+        if (showAll || cards.isEmpty()) return sortBySales(cards)
+        val tier = when {
+            cards.any { it.rating >= 4.9 } -> 4.9
+            cards.any { it.rating >= 4.8 } -> 4.8
+            cards.any { it.rating >= 4.7 } -> 4.7
+            else -> 0.0
+        }
+        if (tier <= 0.0) return sortBySales(cards)
+        val topSeller = cards.filter { it.sold > 0 }.maxByOrNull { it.sold }?.url
+        return sortBySales(cards.filter {
+            it.rating <= 0.0 || it.rating >= tier || it.url == topSeller
+        })
+    }
+
+    /** Urut: penjualan terbanyak dulu, lalu rating tertinggi. */
+    private fun sortBySales(cards: List<PapanStore.Card>): List<PapanStore.Card> =
+        cards.sortedWith(
+            compareByDescending<PapanStore.Card> { it.sold }.thenByDescending { it.rating }
+        )
+
+    private fun hiddenView(count: Int): TextView {
+        val tv = TextView(this)
+        tv.text = getString(R.string.papan_show_all, count)
+        tv.textSize = 12f
+        tv.gravity = Gravity.CENTER
+        tv.setTextColor(getColor(R.color.textOnBrandMuted))
+        tv.setPadding(dp(12), dp(10), dp(12), dp(18))
+        tv.isClickable = true
+        tv.setOnClickListener {
+            showAll = true
+            loadBoard()
+        }
+        return tv
     }
 
     private fun emptyView(): TextView {
@@ -197,6 +251,14 @@ class PapanActivity : AppCompatActivity() {
             rating.setPadding(0, 0, dp(8), 0)
             meta.addView(rating)
         }
+        if (card.sold > 0) {
+            val sold = TextView(this)
+            sold.text = getString(R.string.papan_sold, formatSold(card.sold))
+            sold.textSize = 11f
+            sold.setTextColor(getColor(R.color.textSecondary))
+            sold.setPadding(0, 0, dp(8), 0)
+            meta.addView(sold)
+        }
         if (card.keyword.isNotEmpty()) {
             val keyword = TextView(this)
             keyword.text = getString(R.string.papan_keyword, card.keyword)
@@ -273,7 +335,7 @@ class PapanActivity : AppCompatActivity() {
             !it.checked && Regex("-i\\.\\d+\\.\\d+").containsMatchIn(it.url)
         }
         if (targets.isEmpty()) {
-            startPrices(pendingUrls())
+            handler.postDelayed({ startPrices(pendingUrls()) }, 2500)
             return
         }
         checkRunning = true
@@ -295,7 +357,7 @@ class PapanActivity : AppCompatActivity() {
             }
             checkRunning = false
             pendingSet = pendingUrls().toSet()
-            startPrices(pendingUrls())
+            handler.postDelayed({ startPrices(pendingUrls()) }, 2500)
         }
     }
 
@@ -406,8 +468,8 @@ class PapanActivity : AppCompatActivity() {
         priceTries++
         wv.evaluateJavascript(JS_PRICE) { raw ->
             if (priceUrl != url) return@evaluateJavascript
-            val res = parseJsPrice(raw)
-            val price = res.first
+            val info = parseJsInfo(raw)
+            val price = info.price
             when {
                 // Diblokir Shopee (403/429) -> jeda, bukan berarti produk kosong.
                 httpStatus in 400..599 -> {
@@ -418,7 +480,7 @@ class PapanActivity : AppCompatActivity() {
                     pausePriceFetch()
                 }
                 price.isNotEmpty() -> {
-                    PapanStore.setPrice(this, url, price)
+                    PapanStore.setInfo(this, url, price, info.rating, info.sold)
                     showPrice(url, price)
                     priceUrl = null
                     scheduleNext(PAGE_GAP_MS)
@@ -427,14 +489,14 @@ class PapanActivity : AppCompatActivity() {
                     handler.postDelayed(pollPriceRunnable, 1800)
                 }
                 else -> {
-                    android.util.Log.w(TAG, "harga tak ketemu: ${url.takeLast(50)} | ${res.second}")
-                    val blocked = res.second.isEmpty() || res.second.contains("Masuk", true)
+                    android.util.Log.w(TAG, "harga tak ketemu: ${url.takeLast(50)} | ${info.text}")
+                    val blocked = info.text.isEmpty() || info.text.contains("Masuk", true)
                     if (blocked) {
                         // Halaman kosong / minta login -> hentikan sisa antrean, coba lagi lain waktu.
                         priceQueue.clear()
                         pausePriceFetch()
                     }
-                    if (!pricePageError) PapanStore.setPrice(this, url, "-")
+                    if (!pricePageError) PapanStore.setInfo(this, url, "-", info.rating, info.sold)
                     hidePrice(url)
                     priceUrl = null
                     if (!blocked) scheduleNext(PAGE_GAP_MS)
@@ -470,17 +532,65 @@ class PapanActivity : AppCompatActivity() {
         btnClear.visibility = if (visible == 0) View.GONE else View.VISIBLE
     }
 
-    /** Hasil evaluateJavascript: JSON {"p": harga, "t": cuplikan teks halaman}. */
-    private fun parseJsPrice(raw: String?): Pair<String, String> {
-        if (raw.isNullOrBlank() || raw == "null") return "" to ""
+    /** Hasil evaluateJavascript: harga, rating, jumlah terjual, dan cuplikan teks halaman. */
+    private class PageInfo(val price: String, val rating: Double, val sold: Int, val text: String)
+
+    private fun parseJsInfo(raw: String?): PageInfo {
+        if (raw.isNullOrBlank() || raw == "null") return PageInfo("", 0.0, 0, "")
         return try {
             val o = org.json.JSONObject(raw)
-            val price = o.optString("p").replace(Regex("\\s+"), "").take(24)
-            val text = o.optString("t").replace(Regex("\\s+"), " ").take(200)
-            price to text
+            PageInfo(
+                price = o.optString("p").replace(Regex("\\s+"), "").take(24),
+                rating = o.optString("r").toDoubleOrNull() ?: 0.0,
+                sold = o.optString("s").toIntOrNull() ?: 0,
+                text = o.optString("t").replace(Regex("\\s+"), " ").take(200)
+            )
         } catch (e: Exception) {
-            "" to ""
+            PageInfo("", 0.0, 0, "")
         }
+    }
+
+    private fun formatSold(n: Int): String {
+        val s = when {
+            n >= 1_000_000 -> String.format(Locale.US, "%.1fjt", n / 1_000_000.0)
+            n >= 1000 -> String.format(Locale.US, "%.1frb", n / 1000.0)
+            else -> n.toString()
+        }
+        return s.replace('.', ',').replace(Regex(",0(?=(rb|jt)$)"), "")
+    }
+
+    /**
+     * Buka Shopee di WebView terlihat supaya pengguna bisa lewat verifikasi / login.
+     * Cookie sesi dipakai bersama dengan WebView pengambil harga & rating.
+     */
+    private fun openVerify() {
+        val wv = WebView(this)
+        wv.settings.javaScriptEnabled = true
+        wv.settings.domStorageEnabled = true
+        wv.settings.userAgentString = PRICE_UA
+        val box = android.widget.FrameLayout(this)
+        box.addView(
+            wv,
+            android.widget.FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (resources.displayMetrics.heightPixels * 3 / 4)
+            )
+        )
+        wv.loadUrl(HOME_URL)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.papan_verify_title)
+            .setView(box)
+            .setPositiveButton(R.string.papan_verify_done) { _, _ -> }
+            .setOnDismissListener {
+                wv.stopLoading()
+                wv.destroy()
+                // Sesi baru -> pengambilan harga & rating dicoba lagi.
+                getSharedPreferences("sm_prefs", MODE_PRIVATE).edit()
+                    .remove("papan_price_pause").apply()
+                loadBoard()
+                startPrices(pendingUrls())
+            }
+            .show()
     }
 
     private fun confirmClear() {
@@ -509,6 +619,6 @@ class PapanActivity : AppCompatActivity() {
         const val PAUSE_MS = 30 * 60 * 1000L
         const val RETRY_PRICE_MS = 6 * 60 * 60 * 1000L
         const val HOME_URL = "https://shopee.co.id/"
-        const val JS_PRICE = """(function(){try{var out='',flat='';var b=document.body?document.body.cloneNode(true):null;if(b){var s=b.querySelectorAll('script,style,noscript');for(var i=0;i<s.length;i++){s[i].parentNode.removeChild(s[i]);}var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null),n;while(n=w.nextNode()){var t=(n.nodeValue||'').replace(/\s+/g,'');if(/^Rp\d{3,}$/.test(t)){out=t;break;}}flat=(b.textContent||'').replace(/\s+/g,' ');if(!out){var m=flat.match(/Rp(\d{4,})/);if(m){out='Rp'+m[1];}}if(out){var v=parseInt(out.replace('Rp',''),10);if(!(v>=1000)){out='';}}}return JSON.stringify({p:out,t:flat.substring(0,200)});}catch(err){return JSON.stringify({p:'',t:''});}})()"""
+        const val JS_PRICE = """(function(){try{var out='',flat='',r='',s='';var b=document.body?document.body.cloneNode(true):null;if(b){var sc=b.querySelectorAll('script,style,noscript');for(var i=0;i<sc.length;i++){sc[i].parentNode.removeChild(sc[i]);}var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null),n;while(n=w.nextNode()){var t=(n.nodeValue||'').replace(/\s+/g,'');if(/^Rp\d{3,}$/.test(t)){out=t;break;}}flat=(b.textContent||'').replace(/\s+/g,' ');if(!out){var m=flat.match(/Rp(\d{4,})/);if(m){out='Rp'+m[1];}}if(out){var v=parseInt(out.replace('Rp',''),10);if(!(v>=1000)){out='';}}var head=flat.substring(0,250);var rm=head.match(/(\d[.,]\d{1,2})\s*\/\s*5/)||head.match(/(\d[.,]\d{1,2})\s*(?:Penilaian|rating|Ulasan)/i);if(rm){var rv=parseFloat(rm[1].replace(',','.'));if(rv>0&&rv<=5){r=String(rv);}}var sm=flat.match(/Terjual\s*([\d.]+(?:[.,]\d+)?)\s*(rb|ribu|jt|juta)?/i)||flat.match(/([\d.]+(?:[.,]\d+)?)\s*(rb|ribu|jt|juta)?\s*Terjual/i);if(sm){var num=parseFloat(sm[1].replace(/\./g,'').replace(',','.'));var mul=1;if(sm[2]){if(/^(rb|ribu)$/i.test(sm[2])){mul=1000;}else if(/^(jt|juta)$/i.test(sm[2])){mul=1000000;}}if(num>0){s=String(Math.round(num*mul));}}}return JSON.stringify({p:out,r:r,s:s,t:flat.substring(0,200)});}catch(err){return JSON.stringify({p:'',r:'',s:'',t:''});}})()"""
     }
 }

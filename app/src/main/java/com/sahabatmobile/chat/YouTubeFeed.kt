@@ -28,7 +28,7 @@ object YouTubeFeed {
     /** Cari video YouTube untuk sebuah topik. */
     fun search(query: String, limit: Int = 6): List<YouTubeVideo> {
         val found = fetchOne(query, limit)
-        if (found.size >= 3) return found
+        if (found.size >= 6) return found
         val alt = fetchOne("$query Indonesia", limit)
         val merged = (found + alt).distinctBy { it.id }
         return if (merged.size >= found.size) merged.take(limit) else found

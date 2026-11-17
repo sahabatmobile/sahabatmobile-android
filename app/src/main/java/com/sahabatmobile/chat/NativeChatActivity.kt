@@ -831,60 +831,69 @@ class NativeChatActivity : AppCompatActivity() {
                     setPadding(0, dp(8), 0, 0)
                 })
             } else {
-                videos.forEach { v ->
+                val shown = videos.take(6)
+                for (i in shown.indices step 2) {
                     val row = LinearLayout(this@NativeChatActivity).apply {
                         orientation = LinearLayout.HORIZONTAL
-                        background = getDrawable(R.drawable.bg_preview)
-                        setPadding(dp(8), dp(8), dp(8), dp(8))
                         layoutParams = LinearLayout.LayoutParams(
                             LinearLayout.LayoutParams.MATCH_PARENT,
                             LinearLayout.LayoutParams.WRAP_CONTENT
                         ).apply { topMargin = dp(6) }
                     }
-                    val thumb = ImageView(this@NativeChatActivity).apply {
-                        layoutParams = LinearLayout.LayoutParams(dp(104), dp(70))
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        visibility = View.VISIBLE
-                        clipToOutline = true
-                        background = getDrawable(R.drawable.bg_chip)
-                    }
-                    row.addView(thumb)
-                    val txt = LinearLayout(this@NativeChatActivity).apply {
-                        orientation = LinearLayout.VERTICAL
-                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                            .apply { leftMargin = dp(8) }
-                    }
-                    txt.addView(TextView(this@NativeChatActivity).apply {
-                        text = v.title
-                        textSize = 11f
-                        setTextColor(getColor(R.color.textPrimary))
-                        maxLines = 2
-                        ellipsize = android.text.TextUtils.TruncateAt.END
-                    })
-                    txt.addView(TextView(this@NativeChatActivity).apply {
-                        text = listOfNotNull(
-                            v.channel.takeIf { it.isNotBlank() },
-                            v.duration.takeIf { it.isNotBlank() }
-                        ).joinToString(" · ") + if (v.channel.isNotBlank()) " · YouTube" else " YouTube"
-                        textSize = 9.5f
-                        setTextColor(getColor(R.color.textSecondary))
-                        setPadding(0, dp(3), 0, 0)
-                        maxLines = 1
-                        ellipsize = android.text.TextUtils.TruncateAt.END
-                    })
-                    row.addView(txt)
-                    row.setOnClickListener {
-                        try {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(v.url)))
-                        } catch (e: Exception) {
-                            Toast.makeText(this@NativeChatActivity, "Tidak bisa membuka YouTube", Toast.LENGTH_SHORT).show()
+                    for (j in i until minOf(i + 2, shown.size)) {
+                        val v = shown[j]
+                        val cell = LinearLayout(this@NativeChatActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            background = getDrawable(R.drawable.bg_preview)
+                            setPadding(dp(8), dp(8), dp(8), dp(8))
+                            layoutParams = LinearLayout.LayoutParams(
+                                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                            ).apply {
+                                if (j == i) rightMargin = dp(4) else leftMargin = dp(4)
+                            }
                         }
+                        val thumb = ImageView(this@NativeChatActivity).apply {
+                            layoutParams = LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT, dp(70)
+                            )
+                            scaleType = ImageView.ScaleType.CENTER_CROP
+                            clipToOutline = true
+                            background = getDrawable(R.drawable.bg_chip)
+                        }
+                        cell.addView(thumb)
+                        cell.addView(TextView(this@NativeChatActivity).apply {
+                            text = v.title
+                            textSize = 11f
+                            setTextColor(getColor(R.color.textPrimary))
+                            maxLines = 2
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                            setPadding(0, dp(6), 0, 0)
+                        })
+                        cell.addView(TextView(this@NativeChatActivity).apply {
+                            text = listOfNotNull(
+                                v.channel.takeIf { it.isNotBlank() },
+                                v.duration.takeIf { it.isNotBlank() }
+                            ).joinToString(" · ") + if (v.channel.isNotBlank()) " · YouTube" else " YouTube"
+                            textSize = 9.5f
+                            setTextColor(getColor(R.color.textSecondary))
+                            setPadding(0, dp(3), 0, 0)
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                        })
+                        cell.setOnClickListener {
+                            try {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(v.url)))
+                            } catch (e: Exception) {
+                                Toast.makeText(this@NativeChatActivity, "Tidak bisa membuka YouTube", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        row.addView(cell)
+                        loadNewsThumb(thumb, NewsItem(
+                            title = v.title, source = "YouTube", link = v.thumb,
+                            published = 0L, timeAgo = "", imageUrl = v.thumb
+                        ))
                     }
                     ytList.addView(row)
-                    loadNewsThumb(thumb, NewsItem(
-                        title = v.title, source = "YouTube", link = v.thumb,
-                        published = 0L, timeAgo = "", imageUrl = v.thumb
-                    ))
                 }
             }
             ytList.addView(TextView(this@NativeChatActivity).apply {

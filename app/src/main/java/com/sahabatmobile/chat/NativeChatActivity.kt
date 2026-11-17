@@ -623,82 +623,109 @@ class NativeChatActivity : AppCompatActivity() {
 
         fun drawItems(items: List<NewsItem>) {
             listBox.removeAllViews()
-            items.forEach { n ->
+            val shown = items.take(4)
+            for (i in shown.indices step 2) {
                 val row = LinearLayout(this@NativeChatActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(8), dp(8), dp(8), dp(8))
-                    background = getDrawable(R.drawable.bg_preview)
+                    orientation = LinearLayout.HORIZONTAL
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     ).apply { topMargin = dp(6) }
                 }
-                row.addView(TextView(this@NativeChatActivity).apply {
-                    text = n.title
-                    textSize = 12f
-                    setTextColor(getColor(R.color.textPrimary))
-                    maxLines = 2
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                })
-                val meta = listOfNotNull(
-                    n.source.takeIf { it.isNotBlank() },
-                    n.timeAgo.takeIf { it.isNotBlank() }
-                ).joinToString(" · ")
-                row.addView(TextView(this@NativeChatActivity).apply {
-                    text = meta
-                    textSize = 10f
-                    setTextColor(getColor(R.color.textSecondary))
-                    setPadding(0, dp(3), 0, 0)
-                })
-                row.setOnClickListener {
-                    Toast.makeText(
-                        this@NativeChatActivity,
-                        "Membuka artikel…",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val url = NewsFeed.resolveLink(n.link)
-                        withContext(Dispatchers.Main) {
-                            try {
-                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            } catch (e: Exception) {
-                                Toast.makeText(
-                                    this@NativeChatActivity,
-                                    "Tidak bisa membuka berita",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                for (j in i until minOf(i + 2, shown.size)) {
+                    val n = shown[j]
+                    val cell = LinearLayout(this@NativeChatActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        background = getDrawable(R.drawable.bg_preview)
+                        setPadding(dp(8), dp(8), dp(8), dp(8))
+                        layoutParams = LinearLayout.LayoutParams(
+                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                        ).apply {
+                            if (j == i) rightMargin = dp(4) else leftMargin = dp(4)
+                        }
+                    }
+                    val thumb = ImageView(this@NativeChatActivity).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, dp(74)
+                        )
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        visibility = View.GONE
+                        clipToOutline = true
+                        background = getDrawable(R.drawable.bg_chip)
+                    }
+                    cell.addView(thumb)
+                    cell.addView(TextView(this@NativeChatActivity).apply {
+                        text = n.title
+                        textSize = 11.5f
+                        setTextColor(getColor(R.color.textPrimary))
+                        maxLines = 3
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        setPadding(0, dp(6), 0, 0)
+                    })
+                    val meta = listOfNotNull(
+                        n.source.takeIf { it.isNotBlank() },
+                        n.timeAgo.takeIf { it.isNotBlank() }
+                    ).joinToString(" · ")
+                    cell.addView(TextView(this@NativeChatActivity).apply {
+                        text = meta
+                        textSize = 9.5f
+                        setTextColor(getColor(R.color.textSecondary))
+                        setPadding(0, dp(3), 0, 0)
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    })
+                    val actions = LinearLayout(this@NativeChatActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(0, dp(5), 0, 0)
+                    }
+                    actions.addView(TextView(this@NativeChatActivity).apply {
+                        text = "Tanya AI"
+                        textSize = 9.5f
+                        setTextColor(getColor(R.color.primary))
+                        setPadding(0, 0, dp(10), 0)
+                        setOnClickListener {
+                            pendingArticleTitle = n.title
+                            pendingArticleLink = n.realLink.ifBlank { n.link }
+                            input.setText("Jelaskan secara profesional berita ini: ${n.title}")
+                            input.setSelection(input.text.length)
+                            input.requestFocus()
+                            hideTopbar()
+                        }
+                    })
+                    actions.addView(shareChip {
+                        buildString {
+                            append("📰 ").append(n.title)
+                            if (n.source.isNotBlank()) append("\nSumber: ").append(n.source)
+                            if (n.timeAgo.isNotBlank()) append(" (").append(n.timeAgo).append(")")
+                            append("\n— dikirim dari SahabatMobile AI")
+                        }
+                    })
+                    cell.addView(actions)
+                    cell.setOnClickListener {
+                        Toast.makeText(
+                            this@NativeChatActivity,
+                            "Membuka artikel…",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val url = NewsFeed.resolveLink(n.link)
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                } catch (e: Exception) {
+                                    Toast.makeText(
+                                        this@NativeChatActivity,
+                                        "Tidak bisa membuka berita",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             }
                         }
                     }
+                    row.addView(cell)
+                    loadNewsThumb(thumb, n)
                 }
                 listBox.addView(row)
-                val newsActions = LinearLayout(this@NativeChatActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(8), 0, 0, dp(6))
-                }
-                newsActions.addView(TextView(this@NativeChatActivity).apply {
-                    text = "Tanya AI tentang ini"
-                    textSize = 10.5f
-                    setTextColor(getColor(R.color.primary))
-                    setOnClickListener {
-                        pendingArticleTitle = n.title
-                        pendingArticleLink = n.realLink.ifBlank { n.link }
-                        input.setText("Jelaskan secara profesional berita ini: ${n.title}")
-                        input.setSelection(input.text.length)
-                        input.requestFocus()
-                        hideTopbar()
-                    }
-                })
-                newsActions.addView(shareChip {
-                    buildString {
-                        append("📰 ").append(n.title)
-                        if (n.source.isNotBlank()) append("\nSumber: ").append(n.source)
-                        if (n.timeAgo.isNotBlank()) append(" (").append(n.timeAgo).append(")")
-                        append("\n— dikirim dari SahabatMobile AI")
-                    }
-                })
-                listBox.addView(newsActions)
             }
         }
 
@@ -733,6 +760,28 @@ class NativeChatActivity : AppCompatActivity() {
                         setTextColor(getColor(R.color.textSecondary))
                         setPadding(0, dp(8), 0, 0)
                     })
+                }
+            }
+        }
+    }
+
+    /** Muat thumbnail kecil dari gambar artikel sumber (og:image / img RSS). */
+    private fun loadNewsThumb(iv: ImageView, item: NewsItem) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val url = try { NewsFeed.resolveImage(item) } catch (e: Exception) { "" }
+            val bmp = if (url.isNotBlank()) try {
+                val conn = URL(url).openConnection() as HttpURLConnection
+                conn.connectTimeout = 8000
+                conn.readTimeout = 8000
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) SahabatMobile/1.2.2")
+                if (conn.responseCode == 200) BitmapFactory.decodeStream(conn.inputStream) else null
+            } catch (e: Exception) {
+                null
+            } else null
+            withContext(Dispatchers.Main) {
+                if (bmp != null) {
+                    iv.setImageBitmap(bmp)
+                    iv.visibility = View.VISIBLE
                 }
             }
         }

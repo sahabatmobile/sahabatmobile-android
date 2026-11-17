@@ -22,7 +22,8 @@ data class NewsItem(
     val link: String,
     val published: Long,
     val timeAgo: String,
-    val realLink: String = ""
+    val realLink: String = "",
+    val imageUrl: String = ""
 )
 
 object NewsFeed {
@@ -36,6 +37,7 @@ object NewsFeed {
     private var cacheKey = ""
     private var cacheAt = 0L
     private var cacheItems = emptyList<NewsItem>()
+    private val imageCache = mutableMapOf<String, String>()
 
     val TOPIC_LABEL = mapOf(
         "saham" to "Saham & Investasi",
@@ -71,7 +73,8 @@ object NewsFeed {
                 .put("title", n.title)
                 .put("source", n.source)
                 .put("link", n.link)
-                .put("published", n.published))
+                .put("published", n.published)
+                .put("imageUrl", n.imageUrl))
         }
         context.getSharedPreferences(NEWS_PREFS, Context.MODE_PRIVATE).edit()
             .putString(topic, arr.toString())
@@ -94,7 +97,8 @@ object NewsFeed {
                     source = o.optString("source"),
                     link = o.optString("link"),
                     published = published,
-                    timeAgo = timeAgo(published)
+                    timeAgo = timeAgo(published),
+                    imageUrl = o.optString("imageUrl")
                 )
             }
         } catch (e: Exception) {
@@ -159,6 +163,8 @@ object NewsFeed {
             var source = ""
             var link = ""
             var pubDate = ""
+            var description = ""
+            var imageUrl = ""
             while (event != XmlPullParser.END_DOCUMENT) {
                 when (event) {
                     XmlPullParser.START_TAG -> {
@@ -166,6 +172,10 @@ object NewsFeed {
                         if (tag == "item") {
                             inItem = true
                             title = ""; source = ""; link = ""; pubDate = ""
+                            description = ""; imageUrl = ""
+                        } else if (inItem && tag.substringAfter(':') in setOf("content", "thumbnail", "enclosure")) {
+                            val attr = parser.getAttributeValue(null, "url").orEmpty()
+                            if (attr.startsWith("http") && imageUrl.isBlank()) imageUrl = attr
                         }
                     }
                     XmlPullParser.TEXT, XmlPullParser.CDSECT -> {
@@ -176,6 +186,7 @@ object NewsFeed {
                                 "source" -> if (source.isEmpty()) source = text
                                 "link" -> if (link.isEmpty()) link = text
                                 "pubDate" -> if (pubDate.isEmpty()) pubDate = text
+                                "description" -> if (description.isEmpty()) description = text
                             }
                         }
                     }
@@ -190,13 +201,17 @@ object NewsFeed {
                                 0L
                             }
                             if (cleanTitle.isNotBlank() && link.isNotBlank()) {
+                                val fromDescription = Regex("""(?is)<img[^>]+src=["']([^"']+)["']""")
+                                    .find(description)?.groupValues?.get(1).orEmpty()
                                 items.add(
                                     NewsItem(
                                         cleanTitle,
                                         source.ifBlank { "ANTARA" },
                                         link,
                                         published,
-                                        timeAgo(published)
+                                        timeAgo(published),
+                                        imageUrl = imageUrl.ifBlank { fromDescription }
+                                            .replace("&amp;", "&")
                                     )
                                 )
                             }
@@ -284,6 +299,28 @@ object NewsFeed {
             Log.w(TAG, "gagal resolve link: ${e.message}")
         }
         return url
+    }
+
+    /** Ambil gambar kecil dari artikel sumber (og:image / twitter:image / img pertama). */
+    fun resolveImage(item: NewsItem): String {
+        if (item.imageUrl.isNotBlank()) return item.imageUrl
+        imageCache[item.link]?.let { if (it.isNotBlank()) return it }
+        val url = if (item.link.contains("news.google.com")) resolveLink(item.link) else item.link
+        if (url.isBlank()) return ""
+        val html = get(url, false)
+        if (html.isBlank()) return ""
+        val candidates = listOf(
+            """(?is)<meta[^>]+(?:property|name)\s*=\s*["']og:image["'][^>]+content\s*=\s*["']([^"']+)["']""",
+            """(?is)<meta[^>]+content\s*=\s*["']([^"']+)["'][^>]+(?:property|name)\s*=\s*["']og:image["']""",
+            """(?is)<meta[^>]+(?:property|name)\s*=\s*["']twitter:image["'][^>]+content\s*=\s*["']([^"']+)["']""",
+            """(?is)<img[^>]+src=["']([^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']"""
+        )
+        val img = candidates.mapNotNull { Regex(it).find(html)?.groupValues?.get(1) }
+            .firstOrNull { it.startsWith("http") }
+            .orEmpty()
+            .replace("&amp;", "&")
+        if (img.isNotBlank()) imageCache[item.link] = img
+        return img
     }
 
     private fun get(urlText: String, consent: Boolean): String {

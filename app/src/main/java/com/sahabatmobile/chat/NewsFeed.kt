@@ -109,6 +109,26 @@ object NewsFeed {
     fun fetch(topic: String, limit: Int = 4): List<NewsItem> =
         fetchByQuery(TOPIC_QUERY[topic] ?: TOPIC_QUERY.getValue("umum"), limit)
 
+    /**
+     * Berita untuk kartu beranda: memakai RSS ANTARA karena menyediakan URL gambar
+     * asli dari artikel sumber (media:content / enclosure / img). Google News tidak
+     * menyertakan gambar artikel di RSS-nya.
+     */
+    fun fetchHome(topic: String, limit: Int = 4): List<NewsItem> {
+        val antara = try { readRss(ANTARA) } catch (e: Exception) { emptyList() }
+        val withImage = antara.filter { it.imageUrl.isNotBlank() }
+        val regex = when (topic) {
+            "saham" -> Regex("(?i)saham|ihsg|bursa|emiten|investasi|pasar modal|idr|bank")
+            "seller" -> Regex("(?i)seller|marketplace|jualan|e-commerce|penjualan|umkm|toko|bisnis")
+            else -> null
+        }
+        val matched = if (regex != null) withImage.filter { regex.containsMatchIn(it.title) } else emptyList()
+        val picked = (matched + withImage).distinctBy { it.link }.take(limit)
+        if (picked.size >= limit) return picked
+        val google = try { fetch(topic, limit) } catch (e: Exception) { emptyList() }
+        return (picked + google).distinctBy { it.link }.take(limit)
+    }
+
     @Synchronized
     fun fetchByQuery(query: String, limit: Int = 5): List<NewsItem> {
         if (query.isBlank()) return emptyList()
@@ -305,20 +325,27 @@ object NewsFeed {
     fun resolveImage(item: NewsItem): String {
         if (item.imageUrl.isNotBlank()) return item.imageUrl
         imageCache[item.link]?.let { if (it.isNotBlank()) return it }
-        val url = if (item.link.contains("news.google.com")) resolveLink(item.link) else item.link
-        if (url.isBlank()) return ""
-        val html = get(url, false)
-        if (html.isBlank()) return ""
+        if (item.link.isBlank()) return ""
+        val isGoogle = item.link.contains("news.google.com")
         val candidates = listOf(
             """(?is)<meta[^>]+(?:property|name)\s*=\s*["']og:image["'][^>]+content\s*=\s*["']([^"']+)["']""",
             """(?is)<meta[^>]+content\s*=\s*["']([^"']+)["'][^>]+(?:property|name)\s*=\s*["']og:image["']""",
             """(?is)<meta[^>]+(?:property|name)\s*=\s*["']twitter:image["'][^>]+content\s*=\s*["']([^"']+)["']""",
             """(?is)<img[^>]+src=["']([^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']"""
         )
-        val img = candidates.mapNotNull { Regex(it).find(html)?.groupValues?.get(1) }
+        fun extract(html: String): String = candidates
+            .mapNotNull { Regex(it).find(html)?.groupValues?.get(1) }
             .firstOrNull { it.startsWith("http") }
             .orEmpty()
             .replace("&amp;", "&")
+
+        // Google News menyimpan thumbnail di halaman artikelnya (perlu cookie CONSENT).
+        val html = get(item.link, isGoogle)
+        var img = extract(html)
+        if (img.isBlank() && isGoogle) {
+            val real = resolveLink(item.link)
+            if (real.isNotBlank() && real != item.link) img = extract(get(real, false))
+        }
         if (img.isNotBlank()) imageCache[item.link] = img
         return img
     }

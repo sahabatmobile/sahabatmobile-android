@@ -743,7 +743,7 @@ class NativeChatActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.IO).launch {
             val fresh = try {
-                NewsFeed.fetch(topic, 4)
+                NewsFeed.fetchHome(topic, 4)
             } catch (e: Exception) {
                 emptyList()
             }

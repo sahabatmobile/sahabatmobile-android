@@ -18,6 +18,7 @@ _skip_prompt.py
 # Keystore rilis (jangan pernah di-commit)
 release-keystore.jks
 release-keystore-pass.txt
+keystore.properties
 
 # Sisa artifact penanda tangan
 *.idsig

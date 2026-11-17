@@ -7,10 +7,12 @@ import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.location.LocationManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -57,6 +59,7 @@ import java.io.InputStreamReader
 import java.util.Calendar
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -151,6 +154,7 @@ class NativeChatActivity : AppCompatActivity() {
         const val KEY_SHOW_ALL = "show_all_models"
         const val KEY_WA_AUTO = "wa_auto_reply"
         const val REQ_AUDIO = 1001
+        const val REQ_LOCATION = 1002
         const val SAMPLE_RATE = 16000
         const val ASR_MODEL = "mimo-v2.5-asr"
     }
@@ -201,6 +205,8 @@ class NativeChatActivity : AppCompatActivity() {
     // Fitur #12: Susun Hari Saya (AI planner)
     private var plannerContext: String? = null
     private var pendingPlanParse = false
+    private var pendingArticleTitle = ""
+    private var pendingArticleLink = ""
     private var wideMode: Boolean = false
     private var modelsCache: List<ModelItem> = emptyList()
     private var recorder: AudioRecord? = null
@@ -242,8 +248,22 @@ class NativeChatActivity : AppCompatActivity() {
         wideMode = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_WIDE, false)
         applyWindowInsets()
 
+        // Lokasi dipakai tool nearby_places untuk mencari tempat terdekat.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ),
+                REQ_LOCATION
+            )
+        }
+
         // Jadwalkan ringkasan harian setiap app dibuka (agar alarm selalu fresh)
         DailySummaryReceiver.schedule(this)
+        WeeklySummaryReceiver.schedule(this)
         // Fitur #3: jadwalkan ulang semua pesan terjadwal WA
         ScheduledMessageReceiver.scheduleAll(this)
         // Fitur #8: refresh widget home screen
@@ -365,6 +385,30 @@ class NativeChatActivity : AppCompatActivity() {
             }
         }
 
+        // Aksi dari notifikasi berita: Tanya AI / Dengarkan
+        intent.getStringExtra(DailySummaryReceiver.EXTRA_ASK_TITLE)?.let { title ->
+            pendingArticleTitle = title
+            pendingArticleLink = intent.getStringExtra(DailySummaryReceiver.EXTRA_ASK_LINK).orEmpty()
+            input.setText("Jelaskan secara profesional berita ini: $title")
+            input.setSelection(input.text.length)
+            intent.removeExtra(DailySummaryReceiver.EXTRA_ASK_TITLE)
+            intent.removeExtra(DailySummaryReceiver.EXTRA_ASK_LINK)
+        }
+        intent.getStringExtra(DailySummaryReceiver.EXTRA_SPEAK_TITLE)?.let { speak ->
+            input.postDelayed({
+                try {
+                    tts?.speak(
+                        speak,
+                        android.speech.tts.TextToSpeech.QUEUE_FLUSH,
+                        null,
+                        "news_tts"
+                    )
+                } catch (e: Exception) {
+                }
+            }, 1200)
+            intent.removeExtra(DailySummaryReceiver.EXTRA_SPEAK_TITLE)
+        }
+
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         apiKey = prefs.getString(KEY_API, null)
         model = prefs.getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
@@ -471,6 +515,8 @@ class NativeChatActivity : AppCompatActivity() {
             AssistantData.loadHealth(this).isNotEmpty()
         val isNew = openCount <= 2 && !hasData
         android.util.Log.i("SM_DASH", "renderDailyDashboard openCount=$openCount hasData=$hasData isNew=$isNew")
+        renderNewsCard(container, prefs)
+        renderHabitCard(container)
         if (isNew) return
 
         // Hero + subtitle dinamis untuk pengguna aktif
@@ -547,6 +593,198 @@ class NativeChatActivity : AppCompatActivity() {
         }
         container.addView(card)
         android.util.Log.i("SM_DASH", "dashboard card added, lines=${lines.size}")
+    }
+
+    /** Berita real-time di beranda, dipersonalisasi dari profil (saham / seller / umum). */
+    private fun renderNewsCard(container: LinearLayout, prefs: android.content.SharedPreferences) {
+        val topic = NewsFeed.detectTopic(
+            prefs.getString("profile_job", null),
+            prefs.getString("profile_hobby", null),
+            prefs.getString("profile_goal", null)
+        )
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getDrawable(R.drawable.bg_chip)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(10) }
+        }
+        card.addView(TextView(this).apply {
+            text = "📰 Berita Terkini · " + NewsFeed.label(topic)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.primary))
+        })
+        val listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        card.addView(listBox)
+        container.addView(card)
+
+        fun drawItems(items: List<NewsItem>) {
+            listBox.removeAllViews()
+            items.forEach { n ->
+                val row = LinearLayout(this@NativeChatActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                    background = getDrawable(R.drawable.bg_preview)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = dp(6) }
+                }
+                row.addView(TextView(this@NativeChatActivity).apply {
+                    text = n.title
+                    textSize = 12f
+                    setTextColor(getColor(R.color.textPrimary))
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                val meta = listOfNotNull(
+                    n.source.takeIf { it.isNotBlank() },
+                    n.timeAgo.takeIf { it.isNotBlank() }
+                ).joinToString(" · ")
+                row.addView(TextView(this@NativeChatActivity).apply {
+                    text = meta
+                    textSize = 10f
+                    setTextColor(getColor(R.color.textSecondary))
+                    setPadding(0, dp(3), 0, 0)
+                })
+                row.setOnClickListener {
+                    Toast.makeText(
+                        this@NativeChatActivity,
+                        "Membuka artikel…",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val url = NewsFeed.resolveLink(n.link)
+                        withContext(Dispatchers.Main) {
+                            try {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    this@NativeChatActivity,
+                                    "Tidak bisa membuka berita",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+                listBox.addView(row)
+                val newsActions = LinearLayout(this@NativeChatActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(8), 0, 0, dp(6))
+                }
+                newsActions.addView(TextView(this@NativeChatActivity).apply {
+                    text = "Tanya AI tentang ini"
+                    textSize = 10.5f
+                    setTextColor(getColor(R.color.primary))
+                    setOnClickListener {
+                        pendingArticleTitle = n.title
+                        pendingArticleLink = n.realLink.ifBlank { n.link }
+                        input.setText("Jelaskan secara profesional berita ini: ${n.title}")
+                        input.setSelection(input.text.length)
+                        input.requestFocus()
+                        hideTopbar()
+                    }
+                })
+                newsActions.addView(shareChip {
+                    buildString {
+                        append("📰 ").append(n.title)
+                        if (n.source.isNotBlank()) append("\nSumber: ").append(n.source)
+                        if (n.timeAgo.isNotBlank()) append(" (").append(n.timeAgo).append(")")
+                        append("\n— dikirim dari SahabatMobile AI")
+                    }
+                })
+                listBox.addView(newsActions)
+            }
+        }
+
+        val cached = NewsFeed.loadFromPrefs(this@NativeChatActivity, topic)
+        if (cached.isNotEmpty()) {
+            drawItems(cached)
+        } else {
+            listBox.addView(TextView(this).apply {
+                text = "Memuat berita terbaru…"
+                textSize = 11f
+                setTextColor(getColor(R.color.textSecondary))
+                setPadding(0, dp(8), 0, 0)
+            })
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val fresh = try {
+                NewsFeed.fetch(topic, 4)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            if (fresh.isNotEmpty()) NewsFeed.saveToPrefs(this@NativeChatActivity, topic, fresh)
+            withContext(Dispatchers.Main) {
+                if (card.parent !== container) return@withContext
+                if (fresh.isNotEmpty()) {
+                    drawItems(fresh)
+                } else if (cached.isEmpty()) {
+                    listBox.removeAllViews()
+                    listBox.addView(TextView(this@NativeChatActivity).apply {
+                        text = "Berita belum bisa dimuat. Cek koneksi internet."
+                        textSize = 11f
+                        setTextColor(getColor(R.color.textSecondary))
+                        setPadding(0, dp(8), 0, 0)
+                    })
+                }
+            }
+        }
+    }
+
+    /** Ringkasan kebiasaan dari riwayat chat, tampil di bawah berita. */
+    private fun renderHabitCard(container: LinearLayout) {
+        val base = HabitInsight.analyze(this)
+        if (base.messageCount < 1) return
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getDrawable(R.drawable.bg_chip)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(10) }
+        }
+        card.addView(TextView(this).apply {
+            text = "🧠 Kebiasaanmu"
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.primary))
+        })
+        val body = TextView(this).apply {
+            text = HabitInsight.cached(this@NativeChatActivity) ?: base.text
+            textSize = 12f
+            setTextColor(getColor(R.color.textPrimary))
+            setLineSpacing(dp(2).toFloat(), 1.1f)
+            setPadding(0, dp(8), 0, 0)
+        }
+        card.addView(body)
+        card.addView(TextView(this).apply {
+            text = "Dari ${base.messageCount} pesan terakhir · AI menyesuaikan bantuan untukmu"
+            textSize = 10f
+            setTextColor(getColor(R.color.textSecondary))
+            setPadding(0, dp(6), 0, 0)
+        })
+        container.addView(card)
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val ai = HabitInsight.summarizeWithAi(
+                this@NativeChatActivity,
+                HabitInsight.userMessages(this@NativeChatActivity)
+            )
+            if (!ai.isNullOrBlank()) HabitInsight.save(this@NativeChatActivity, ai)
+            withContext(Dispatchers.Main) {
+                if (card.parent !== container) return@withContext
+                if (!ai.isNullOrBlank()) body.text = ai
+            }
+        }
     }
 
     private fun loadSessions(): JSONArray {
@@ -1064,7 +1302,13 @@ class NativeChatActivity : AppCompatActivity() {
      * Kartu saran produk marketplace — tampil di chat setelah tool market_search.
      * Tap salah satu produk → langsung dibuka di app Shopee.
      */
-    private fun addProductCard(keyword: String, products: List<MarketProduct>, pinned: Int = 0) {
+    private fun addProductCard(
+        keyword: String,
+        products: List<MarketProduct>,
+        pinned: Int = 0,
+        foodMode: Boolean = false,
+        foodApps: List<FoodApp> = emptyList()
+    ) {
         if (products.isEmpty()) return
         val markets = products.map { it.market }.distinct()
         val marketLabel = if (markets.size == 1) markets.first().label
@@ -1078,7 +1322,8 @@ class NativeChatActivity : AppCompatActivity() {
         card.setPadding(pad, pad, pad, pad)
 
         val header = TextView(this)
-        header.text = "🛒 Saran Produk $marketLabel — \"$keyword\""
+        header.text = if (foodMode) "🍜 ShopeeFood — \"$keyword\""
+        else "🛒 Saran Produk $marketLabel — \"$keyword\""
         header.textSize = 13f
         header.setTypeface(null, android.graphics.Typeface.BOLD)
         header.setTextColor(getColor(R.color.primary))
@@ -1176,6 +1421,43 @@ class NativeChatActivity : AppCompatActivity() {
             card.addView(itemRow)
         }
 
+        if (foodMode) {
+            val appRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(6), dp(6), dp(6), 0)
+            }
+            val chips = mutableListOf<Pair<String, () -> Unit>>()
+            foodApps.filter { it.label.equals("ShopeeFood", true) }.forEach { app ->
+                chips.add("Buka di ${app.label}" to {
+                    if (!FoodApps.open(this@NativeChatActivity, app)) {
+                        Toast.makeText(this@NativeChatActivity, "Gagal membuka ${app.label}", Toast.LENGTH_SHORT).show()
+                    }
+                })
+            }
+            chips.add("Buka di Shopee" to { MarketSearch.openInMarket(this@NativeChatActivity, products.first().url) })
+            chips.add("Lihat di Google Maps" to {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(
+                    "https://www.google.com/maps/search/" + URLEncoder.encode("$keyword makanan", "UTF-8")
+                )))
+            })
+            chips.forEach { (label, action) ->
+                appRow.addView(TextView(this).apply {
+                    text = label
+                    textSize = 10.5f
+                    setTextColor(getColor(R.color.primary))
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    background = getDrawable(R.drawable.bg_chip)
+                    setPadding(dp(8), dp(5), dp(8), dp(5))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { marginEnd = dp(6) }
+                    setOnClickListener { action() }
+                })
+            }
+            card.addView(appRow)
+        }
+
         // Footer: petunjuk + tombol simpan ke Papan Hasil AI
         val footerRow = LinearLayout(this)
         footerRow.orientation = LinearLayout.HORIZONTAL
@@ -1210,6 +1492,18 @@ class NativeChatActivity : AppCompatActivity() {
                 pin.setTextColor(getColor(R.color.successText))
             }
         }
+        footerRow.addView(shareChip {
+            buildString {
+                append(if (foodMode) "🍜 Rekomendasi makanan" else "🛒 Rekomendasi produk")
+                append(" — \"").append(keyword).append("\"\n")
+                products.forEachIndexed { idx, p ->
+                    append(idx + 1).append(". ").append(p.title)
+                    if (p.price.isNotBlank()) append(" — ").append(p.price)
+                    append("\n").append(p.url).append("\n")
+                }
+                append("— dikirim dari SahabatMobile AI")
+            }
+        })
         footerRow.addView(pin)
         card.addView(footerRow)
 
@@ -2295,6 +2589,31 @@ class NativeChatActivity : AppCompatActivity() {
         scrollView.post { scrollView.smoothScrollTo(0, bubbleContainer.height) }
     }
 
+    /** Buka WhatsApp dengan teks siap kirim. */
+    private fun shareToWhatsApp(text: String) {
+        val url = "https://api.whatsapp.com/send?text=" + URLEncoder.encode(text.take(4000), "UTF-8")
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            Toast.makeText(this, "WhatsApp tidak tersedia", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Chip "Bagikan" untuk kartu-kartu hasil AI. */
+    private fun shareChip(textProvider: () -> String): TextView = TextView(this).apply {
+        text = "Bagikan"
+        textSize = 10.5f
+        setTextColor(getColor(R.color.primary))
+        setTypeface(null, android.graphics.Typeface.BOLD)
+        background = getDrawable(R.drawable.bg_chip)
+        setPadding(dp(8), dp(3), dp(8), dp(3))
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { marginEnd = dp(6) }
+        setOnClickListener { shareToWhatsApp(textProvider()) }
+    }
+
     private fun copyToClipboard(text: String) {
         val cm = getSystemService(ClipboardManager::class.java)
         cm.setPrimaryClip(ClipData.newPlainText(getString(R.string.brand_small), text))
@@ -2303,6 +2622,10 @@ class NativeChatActivity : AppCompatActivity() {
 
     private fun sendMessage() {
         val text = input.text.toString().trim()
+        if (!text.contains("berita ini", true)) {
+            pendingArticleTitle = ""
+            pendingArticleLink = ""
+        }
         val imagePath = pendingImagePath
         if (text.isEmpty() && imagePath == null) return
         if (apiKey.isNullOrEmpty()) {
@@ -2353,6 +2676,22 @@ class NativeChatActivity : AppCompatActivity() {
                 val msgs = JSONArray()
                 val ass = assistant.optString("prompt")
                 var systemText = ass
+                if (pendingArticleLink.isNotBlank()) {
+                    val articleTitle = pendingArticleTitle
+                    val articleLink = pendingArticleLink
+                    pendingArticleTitle = ""
+                    pendingArticleLink = ""
+                    val body = try {
+                        NewsFeed.fetchArticleText(articleLink)
+                    } catch (e: Exception) {
+                        ""
+                    }
+                    if (body.isNotBlank()) {
+                        systemText += "\n\nARTIKEL YANG SEDANG DIBAHAS: \"$articleTitle\"\n" +
+                            "ISI ARTIKEL (sumber: $articleLink):\n$body\n" +
+                            "Gunakan isi artikel ini sebagai dasar analisis profesional dan sebutkan sumbernya."
+                    }
+                }
                 val profileCtx = profileContext()
                 if (profileCtx.isNotEmpty()) {
                     systemText = if (systemText.isEmpty()) profileCtx else systemText + "\n\n" + profileCtx
@@ -2367,6 +2706,8 @@ class NativeChatActivity : AppCompatActivity() {
                     "Jika pengguna mencari atau ingin membeli produk barang (harga, rekomendasi belanja), SELALU gunakan tool market_search untuk mencari produk di marketplace " +
                     "(Shopee, Tokopedia, Blibli, atau Lazada - sesuai yang diminta pengguna; jika tidak disebut, biarkan parameter marketplace kosong supaya semua marketplace dicari). Hasil pencarian otomatis menjadi kartu produk dan otomatis tersimpan ke Papan Hasil AI. " +
                     "Jangan jawab hanya dengan keyword/kata kunci, dan jangan pernah mengatakan kartu produk sudah tampil bila kamu belum benar-benar memanggil tool-nya. " +
+                    "Jika pengguna mencari tempat atau lokasi terdekat (dokter gigi, klinik, rumah sakit, apotek, dan sejenisnya), SELALU gunakan tool nearby_places agar 5 lokasi terdekat ditampilkan otomatis sebagai kartu lokasi di chat, lengkap dengan alamat, jarak, rating, dan tombol membuka Google Maps. " +
+                    "Jangan menebak alamat atau lokasi dari pengetahuanmu sendiri untuk permintaan 'terdekat' — pakai tool-nya. " +
                     "Jawaban kamu selalu berupa teks biasa - jangan sisipkan gambar, tabel besar, atau tautan markdown. Gambar produk hanya sudah ditampilkan otomatis di kartu hasil pencarian."
                 if (systemText.isNotEmpty() && !systemText.contains("pencarian web", ignoreCase = true)) {
                     systemText = systemText + "\n\n" + webSearchInstruction
@@ -2404,7 +2745,31 @@ class NativeChatActivity : AppCompatActivity() {
                         .put("name", "market_search")
                         .put("description", "Mencari produk di marketplace Indonesia (Shopee, Tokopedia, Blibli, Lazada) dan menampilkan produk terbaik sebagai saran di chat. Hasil otomatis tersimpan di Papan Hasil AI.")
                         .put("parameters", marketParams))
-                val toolsArray = JSONArray().put(webTools).put(marketTools)
+                val nearbyParams = JSONObject()
+                    .put("type", "object")
+                    .put("properties", JSONObject()
+                        .put("query", JSONObject().put("type", "string")
+                            .put("description", "Jenis tempat yang dicari, misal: dokter gigi, klinik gigi, apotek, rumah sakit.")))
+                    .put("required", JSONArray().put("query"))
+                val nearbyTools = JSONObject()
+                    .put("type", "function")
+                    .put("function", JSONObject()
+                        .put("name", "nearby_places")
+                        .put("description", "Mencari tempat/lokasi terdekat di Google Maps berdasarkan lokasi pengguna saat ini dan menampilkan 5 hasil terdekat sebagai kartu lokasi di chat (nama, alamat, jarak, rating, dan tombol buka Google Maps).")
+                        .put("parameters", nearbyParams))
+                val foodParams = JSONObject()
+                    .put("type", "object")
+                    .put("properties", JSONObject()
+                        .put("query", JSONObject().put("type", "string")
+                            .put("description", "Jenis makanan atau nama restoran yang dicari, misal: ayam geprek, kopi, seafood.")))
+                    .put("required", JSONArray().put("query"))
+                val foodTools = JSONObject()
+                    .put("type", "function")
+                    .put("function", JSONObject()
+                        .put("name", "food_delivery")
+                        .put("description", "Mencari 5 restoran atau tempat makan terdekat di Google Maps untuk dipesan lewat aplikasi food delivery yang terpasang di HP (Gojek, Grab, ShopeeFood, foodpanda).")
+                        .put("parameters", foodParams))
+                val toolsArray = JSONArray().put(webTools).put(marketTools).put(nearbyTools).put(foodTools)
                 val lastUserText = msgs.getJSONObject(msgs.length() - 1).optString("content")
                 // Marketplace yang disebut di pesan; null = tidak disebut -> cari di semua.
                 val marketFromText: Market? = Market.values()
@@ -2414,15 +2779,59 @@ class NativeChatActivity : AppCompatActivity() {
                     .containsMatchIn(lastUserText)
                 val isInfoQuery = Regex("(?i)\\b(berita|informasi|artikel|resep|jadwal|lokasi|cuaca|sejarah|makna|pengertian|tutorial|lowongan|harga emas|saham)\\b")
                     .containsMatchIn(lastUserText)
-                val forceMarket = (hasSearchVerb && !isInfoQuery) ||
-                        Regex("(?i)shopee|tokopedia|blibli|lazada|marketplace|jaket|koko|baju|sepatu|celana|kemeja|hoodie|tshirt|pakaian|kaos|polo|tas|dompet|power|charger|iphone|samsung|tablet|laptop|earphone|headphone|speaker|celengan|mantel|sandal|sendal|helm|kacamata|parfum|gamis|hijab|mukena|sarung|peci|topi|koper|kamera|mouse|keyboard|komputer|monitor|kulkas|blender|kompor|panci|sepeda|baterai|kabel|flashdisk").containsMatchIn(lastUserText)
-                val toolChoice: Any = if (forceMarket) JSONObject().put("type", "function").put("function", JSONObject().put("name", "market_search")) else "auto"
+                val forceNearby = Regex("(?i)(dokter gigi|klinik gigi|klinik|dokter|rumah sakit|\\brs\\b|apotek|puskesmas|terdekat|dekat sini|sekitar sini|nearby|near me)").containsMatchIn(lastUserText)
+                val forceFood = !forceNearby && Regex("(?i)(go ?food|grab ?food|shopeefood|foodpanda|pesan makan|makanan|makan|kuliner|restoran|warung|lapar|food delivery|delivery|ayam|kopi|seafood|bakso|pizza|burger)").containsMatchIn(lastUserText)
+                val isArticleAsk = lastUserText.contains("berita ini", true)
+                val forceMarket = !forceNearby && !forceFood && !isArticleAsk && ((hasSearchVerb && !isInfoQuery) ||
+                        Regex("(?i)shopee|tokopedia|blibli|lazada|marketplace|jaket|koko|baju|sepatu|celana|kemeja|hoodie|tshirt|pakaian|kaos|polo|tas|dompet|power|charger|iphone|samsung|tablet|laptop|earphone|headphone|speaker|celengan|mantel|sandal|sendal|helm|kacamata|parfum|gamis|hijab|mukena|sarung|peci|topi|koper|kamera|mouse|keyboard|komputer|monitor|kulkas|blender|kompor|panci|sepeda|baterai|kabel|flashdisk").containsMatchIn(lastUserText))
+                val forceWeb = !forceNearby && !forceFood && !forceMarket &&
+                        (isArticleAsk || Regex("(?i)(berita|kabar|terkini|terbaru|hari ini|update|ihsg|saham|pasar|kurs|inflasi|suku bunga|info harga)").containsMatchIn(lastUserText))
+                var activeTools = toolsArray
+                var webSearchDone = false
+                if (forceWeb) {
+                    val newsQuery = lastUserText
+                        .replace(Regex("(?i)^(jelaskan|jelaskan secara|tolong|please|beri|kasih|apa|bagaimana)\\b"), " ")
+                        .replace(Regex("(?i)\\b(secara profesional|berita ini|berita|terkini|terbaru|hari ini|update)\\b"), " ")
+                        .replace(Regex("\\s+"), " ")
+                        .trim()
+                        .ifEmpty { "berita Indonesia" }
+                    val items = try {
+                        NewsFeed.fetchByQuery(newsQuery, 5)
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                    if (items.isNotEmpty()) {
+                        val ctx = StringBuilder()
+                            .append("\n\nKONTEKS BERITA TERKINI (data real-time dari Google News/ANTARA):\n")
+                        items.forEachIndexed { ni, n ->
+                            ctx.append(ni + 1).append(". ").append(n.title)
+                                .append(" — ").append(n.source)
+                                .append(" (").append(n.timeAgo).append(")\n")
+                        }
+                        ctx.append("Berita di atas sudah tersedia. Jangan panggil tool web_search; jawab langsung dengan gaya profesional, sebutkan sumbernya, dan jangan keluarkan format tool call.")
+                        val sys = msgs.getJSONObject(0)
+                        sys.put("content", sys.optString("content") + ctx.toString())
+                        webSearchDone = true
+                        val filtered = JSONArray()
+                        for (ti in 0 until toolsArray.length()) {
+                            val fn = toolsArray.optJSONObject(ti)?.optJSONObject("function")?.optString("name") ?: ""
+                            if (fn != "web_search") filtered.put(toolsArray.get(ti))
+                        }
+                        activeTools = filtered
+                    }
+                }
+                val toolChoice: Any = when {
+                    forceNearby -> JSONObject().put("type", "function").put("function", JSONObject().put("name", "nearby_places"))
+                    forceFood -> JSONObject().put("type", "function").put("function", JSONObject().put("name", "food_delivery"))
+                    forceMarket -> JSONObject().put("type", "function").put("function", JSONObject().put("name", "market_search"))
+                    else -> "auto"
+                }
                 var payload = JSONObject()
                     .put("model", model)
                     .put("messages", msgs)
                     .put("stream", true)
                     .put("max_tokens", 8000)
-                    .put("tools", toolsArray)
+                    .put("tools", activeTools)
                     .put("tool_choice", toolChoice)
 
                 var content: String? = null
@@ -2448,7 +2857,7 @@ class NativeChatActivity : AppCompatActivity() {
                     if (conn.responseCode != 200) {
                         val err = conn.errorStream?.bufferedReader()?.readText()
                         android.util.Log.e("SM_CHAT", "HTTP ${conn.responseCode} err=${err?.take(400)}")
-                        error = parseError(err, conn.responseCode)
+                        error = sanitizeError(parseError(err, conn.responseCode))
                     } else {
                         val reader = BufferedReader(InputStreamReader(conn.inputStream))
                         var line: String?
@@ -2467,7 +2876,7 @@ class NativeChatActivity : AppCompatActivity() {
                             val chunk = JSONObject(data)
                             val chunkErr = chunk.optJSONObject("error")
                             if (chunkErr != null) {
-                                error = chunkErr.optString("message").ifEmpty { getString(R.string.error_generic) }
+                                error = sanitizeError(chunkErr.optString("message").ifEmpty { getString(R.string.error_generic) })
                                 break
                             }
                             val deltaObj = chunk
@@ -2517,6 +2926,8 @@ class NativeChatActivity : AppCompatActivity() {
                         if (assembled != null && rounds < 3) {
                             val toolMsgs = JSONArray()
                             var shopeeFound = false
+                            var nearbyFound = false
+                            var foodFound = false
                             var hasOtherTool = false
                             for (ci in 0 until assembled.length()) {
                                 val call = assembled.optJSONObject(ci) ?: continue
@@ -2584,13 +2995,114 @@ class NativeChatActivity : AppCompatActivity() {
                                     }
                                     "web_search" -> {
                                         hasOtherTool = true
-                                        val query = argsJson.optString("query")
-                                        if (query.isNotEmpty()) {
-                                            "Hasil pencarian web untuk \"$query\" sedang diproses oleh sistem. " +
-                                                "Berdasarkan pengetahuan terbarumu, berikan jawaban final yang lengkap dan praktis."
+                                        if (webSearchDone) {
+                                            "Data berita sudah diambil pada langkah sebelumnya. Gunakan hasil itu untuk menjawab final."
                                         } else {
-                                            "Hasil pencarian web sedang diproses oleh sistem. " +
-                                                "Berdasarkan pengetahuan terbarumu, berikan jawaban final yang lengkap dan praktis."
+                                        webSearchDone = true
+                                        val query = argsJson.optString("query")
+                                        if (query.isNotBlank()) {
+                                            val items = try {
+                                                NewsFeed.fetchByQuery(query, 5)
+                                            } catch (e: Exception) {
+                                                emptyList()
+                                            }
+                                            if (items.isNotEmpty()) {
+                                                val newsText = StringBuilder()
+                                                    .append("Berita/info terbaru dari pencarian web untuk \"").append(query).append("\":\n")
+                                                items.forEachIndexed { ni, n ->
+                                                    newsText.append(ni + 1).append(". ").append(n.title)
+                                                    if (n.source.isNotBlank()) newsText.append(" — ").append(n.source)
+                                                    if (n.timeAgo.isNotBlank()) newsText.append(" (").append(n.timeAgo).append(")")
+                                                    newsText.append("\n")
+                                                }
+                                                newsText.append("Gunakan informasi di atas sebagai sumber terkini. ")
+                                                newsText.append("Sebutkan nama sumber saat menyampaikan fakta dan jawab dengan gaya profesional.")
+                                                newsText.toString()
+                                            } else {
+                                                "Pencarian web untuk \"$query\" tidak menghasilkan berita. " +
+                                                    "Berikan jawaban yang jelas dan sebutkan keterbatasan informasinya."
+                                            }
+                                        } else {
+                                            "Parameter pencarian kosong. Minta pengguna menyebut topik yang ingin dicari."
+                                        }
+                                        }
+                                    }
+                                    "nearby_places" -> {
+                                        if (cardRendered) {
+                                            "Kartu lokasi sudah ditampilkan di chat. Gunakan satu kartu saja."
+                                        } else {
+                                            val q = argsJson.optString("query").ifEmpty { nearbyQueryFrom(lastUserText) }
+                                            val loc = currentLocation()
+                                            val places = try {
+                                                NearbyPlaces.search(q, loc.first, loc.second)
+                                            } catch (e: Exception) {
+                                                emptyList()
+                                            }
+                                            if (places.isNotEmpty()) {
+                                                nearbyFound = true
+                                                cardRendered = true
+                                                val md = StringBuilder()
+                                                    .append("📍 **").append(q).append(" Terdekat**\n")
+                                                places.forEachIndexed { idx, p ->
+                                                    md.append(idx + 1).append(". ").append(p.name)
+                                                        .append(" — ").append(p.address)
+                                                        .append(" (")
+                                                        .append(String.format(Locale.getDefault(), "%.1f", p.distanceKm))
+                                                        .append(" km)\n")
+                                                }
+                                                shopeeHistoryMsg = JSONObject()
+                                                    .put("role", "assistant")
+                                                    .put("content", md.toString().trim())
+                                                withContext(Dispatchers.Main) {
+                                                    addNearbyCard(q, places, loc)
+                                                }
+                                                "Lokasi $q terdekat sudah ditampilkan sebagai kartu lokasi di chat, lengkap dengan alamat, jarak, rating, dan tombol buka Google Maps. Jangan ulang daftar lokasi dalam jawabanmu — cukup singkat saja."
+                                            } else {
+                                                "Tidak menemukan data lokasi $q dari Google Maps. Berikan saran umum singkat."
+                                            }
+                                        }
+                                    }
+                                    "food_delivery" -> {
+                                        if (cardRendered) {
+                                            "Kartu makanan sudah ditampilkan di chat. Gunakan satu kartu saja."
+                                        } else {
+                                            val kw = argsJson.optString("query").ifEmpty { foodQueryFrom(lastUserText) }
+                                            val loc = currentLocation()
+                                            val places = try {
+                                                NearbyPlaces.search("restoran $kw", loc.first, loc.second)
+                                            } catch (e: Exception) {
+                                                emptyList()
+                                            }
+                                            if (places.isNotEmpty()) {
+                                                foodFound = true
+                                                cardRendered = true
+                                                val apps = FoodApps.installed(this@NativeChatActivity)
+                                                val city = cityFromAddress(places.first().address)
+                                                val md = StringBuilder()
+                                                    .append("🍜 **Tempat Makan · area ").append(city).append(" — \"")
+                                                    .append(kw).append("**\n")
+                                                places.forEachIndexed { idx, p ->
+                                                    md.append(idx + 1).append(". ").append(p.name)
+                                                        .append(" — ").append(p.address)
+                                                        .append(" (")
+                                                        .append(String.format(Locale.getDefault(), "%.1f", p.distanceKm))
+                                                        .append(" km)\n")
+                                                }
+                                                shopeeHistoryMsg = JSONObject()
+                                                    .put("role", "assistant")
+                                                    .put("content", md.toString().trim())
+                                                withContext(Dispatchers.Main) {
+                                                    addNearbyCard(
+                                                        kw, places, loc,
+                                                        foodMode = true,
+                                                        city = city,
+                                                        apps = apps
+                                                    )
+                                                }
+                                                "5 tempat makan di area $city untuk \"$kw\" sudah ditampilkan sebagai kartu lokasi terdekat (lengkap dengan jarak, alamat, jam buka, dan tombol pesan/rute). Jangan ulang daftar di jawabanmu — cukup singkat saja."
+                                            } else {
+                                                "Tidak menemukan tempat makan terdekat untuk \"$kw\". Berikan saran umum singkat."
+                                            }
                                         }
                                     }
                                     else -> {
@@ -2606,7 +3118,7 @@ class NativeChatActivity : AppCompatActivity() {
                                 )
                             }
                             // Pencarian Shopee sukses → tampilkan kartu saja (tanpa bubble teks tambahan)
-                            if (shopeeFound && !hasOtherTool && fnAllShopee(assembled)) {
+                            if ((shopeeFound || nearbyFound) && !hasOtherTool && fnAllCards(assembled)) {
                                 cardOnly = true
                                 sb.setLength(0)
                                 break
@@ -2622,7 +3134,7 @@ class NativeChatActivity : AppCompatActivity() {
                                 .put("messages", msgs)
                                 .put("stream", true)
                                 .put("max_tokens", 8000)
-                                .put("tools", toolsArray)
+                                .put("tools", activeTools)
                                 .put("tool_choice", "auto")
                             content = null
                             toolIds.clear(); toolNames.clear(); toolArgs.clear()
@@ -2688,8 +3200,73 @@ class NativeChatActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) { addProductCard(kwDirect, productsDirect, pinnedDirect) }
                     }
                 }
+
+                // Paksa pencarian makanan bila intent food delivery terdeteksi tetapi model tidak memanggil tool
+                if (forceFood && !cardRendered) {
+                    val kwFood = foodQueryFrom(lastUserText)
+                    val locFood = currentLocation()
+                    val foodPlaces = try {
+                        NearbyPlaces.search("restoran $kwFood", locFood.first, locFood.second)
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                    if (foodPlaces.isNotEmpty()) {
+                        cardRendered = true
+                        cardOnly = true
+                        error = null
+                        sb.setLength(0)
+                        val apps = FoodApps.installed(this@NativeChatActivity)
+                        val city = cityFromAddress(foodPlaces.first().address)
+                        val mdFood = StringBuilder()
+                            .append("🍜 **Tempat Makan · area ").append(city).append(" — \"")
+                            .append(kwFood).append("**\n")
+                        foodPlaces.forEachIndexed { idx, p ->
+                            mdFood.append(idx + 1).append(". ").append(p.name)
+                                .append(" — ").append(p.address)
+                                .append(" (")
+                                .append(String.format(Locale.getDefault(), "%.1f", p.distanceKm))
+                                .append(" km)\n")
+                        }
+                        shopeeHistoryMsg = JSONObject().put("role", "assistant").put("content", mdFood.toString().trim())
+                        withContext(Dispatchers.Main) {
+                            addNearbyCard(
+                                kwFood, foodPlaces, locFood,
+                                foodMode = true,
+                                city = city,
+                                apps = apps
+                            )
+                        }
+                    }
+                }
+
+                // Paksa pencarian lokasi bila intent "terdekat" terdeteksi tetapi model tidak memanggil tool
+                if (forceNearby && !cardRendered) {
+                    val qDirect = nearbyQueryFrom(lastUserText)
+                    val locDirect = currentLocation()
+                    val placesDirect = try {
+                        NearbyPlaces.search(qDirect, locDirect.first, locDirect.second)
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                    if (placesDirect.isNotEmpty()) {
+                        cardRendered = true
+                        cardOnly = true
+                        error = null
+                        sb.setLength(0)
+                        val mdDirect = StringBuilder().append("📍 **").append(qDirect).append(" Terdekat**\n")
+                        placesDirect.forEachIndexed { idx, p ->
+                            mdDirect.append(idx + 1).append(". ").append(p.name)
+                                .append(" — ").append(p.address)
+                                .append(" (")
+                                .append(String.format(Locale.getDefault(), "%.1f", p.distanceKm))
+                                .append(" km)\n")
+                        }
+                        shopeeHistoryMsg = JSONObject().put("role", "assistant").put("content", mdDirect.toString().trim())
+                        withContext(Dispatchers.Main) { addNearbyCard(qDirect, placesDirect, locDirect) }
+                    }
+                }
             } catch (e: Exception) {
-                if (sb.isEmpty()) error = e.message ?: getString(R.string.error_generic)
+                if (sb.isEmpty()) error = friendlyError(e)
             }
 
             withContext(Dispatchers.Main) {
@@ -2750,13 +3327,299 @@ class NativeChatActivity : AppCompatActivity() {
         }
     }
 
-    /** True jika semua tool_calls adalah market_search/shopee_search. */
-    private fun fnAllShopee(assembled: JSONArray): Boolean {
+    /** True jika semua tool_calls menghasilkan kartu (produk/lokasi). */
+    private fun fnAllCards(assembled: JSONArray): Boolean {
         for (i in 0 until assembled.length()) {
             val fn = assembled.optJSONObject(i)?.optJSONObject("function")?.optString("name") ?: ""
-            if (fn != "market_search" && fn != "shopee_search") return false
+            if (fn != "market_search" && fn != "shopee_search" && fn != "nearby_places" && fn != "food_delivery") return false
         }
         return assembled.length() > 0
+    }
+
+    /** Ambil nama kota dari alamat Google Maps, mis. "Kota Malang, Jawa Timur" -> "Malang". */
+    private fun cityFromAddress(address: String): String {
+        Regex("""Kota\s+([^,]+)""", RegexOption.IGNORE_CASE).find(address)?.let {
+            return it.groupValues[1].trim().removeSuffix(" City")
+        }
+        Regex("""([A-Za-z][A-Za-z\s]+?)\s+City""", RegexOption.IGNORE_CASE).find(address)?.let {
+            return it.groupValues[1].trim()
+        }
+        return address.split(',').map { it.trim() }
+            .lastOrNull { it.isNotBlank() && !Regex("""\d|Jawa|Indonesia|Timur|Barat|Utara|Selatan""").containsMatchIn(it) }
+            ?: "sekitar Anda"
+    }
+
+    /** Kata kunci makanan dari kalimat user, mis. "pesan ayam geprek lewat gofood" -> "ayam geprek". */
+    private fun foodQueryFrom(text: String): String {
+        val cleaned = text
+            .replace(Regex("(?i)\\b(cari|pesan|beli|tolong|mohon|mau|ingin|lewat|via|di|pakai|pak|pake|go ?food|grab ?food|shopeefood|foodpanda|makanan|makan|delivery|terdekat|yang|untuk|dong|ya|please|search|find)\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return cleaned.ifEmpty { "makanan siap saji" }
+    }
+
+    /** Kata kunci tempat dari kalimat user, mis. "cari dokter gigi terdekat" -> "dokter gigi". */
+    private fun nearbyQueryFrom(text: String): String {
+        val m = Regex("(?i)(dokter gigi|klinik gigi|klinik|dokter|rumah sakit|apotek|puskesmas|pom bensin|masjid|hotel|restoran|sekolah|bank)")
+            .find(text)
+        if (m != null) return m.value.lowercase(Locale.getDefault())
+        return text
+            .replace(Regex("(?i)\\b(cari|carikan|tolong|mohon|di|yang|untuk|dong|ya|please|search|find|terdekat|dekat|sekitar|sini|lokasi|tempat)\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifEmpty { "dokter gigi" }
+    }
+
+    /** Lokasi terakhir yang diketahui; fallback ke Jakarta bila izin belum diberikan. */
+    @SuppressLint("MissingPermission")
+    private fun currentLocation(): Pair<Double, Double> {
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            try {
+                val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                val best = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                    .mapNotNull { provider ->
+                        try {
+                            lm.getLastKnownLocation(provider)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    .maxByOrNull { it.time }
+                if (best != null) return best.latitude to best.longitude
+            } catch (e: Exception) {
+            }
+        }
+        return -6.2088 to 106.8456
+    }
+
+    /** Kartu 5 lokasi terdekat dari Google Maps. Tap baris -> dibuka di Google Maps. */
+    private fun addNearbyCard(
+        query: String,
+        places: List<NearbyPlace>,
+        origin: Pair<Double, Double>,
+        foodMode: Boolean = false,
+        city: String = "",
+        apps: List<FoodApp> = emptyList()
+    ) {
+        if (places.isEmpty()) return
+        val pad = resources.getDimensionPixelSize(R.dimen.bubble_padding)
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getDrawable(R.drawable.bg_bubble_ai)
+            elevation = dp(1).toFloat()
+            setPadding(pad, pad, pad, pad)
+        }
+
+        card.addView(TextView(this).apply {
+            text = if (foodMode) "🍜 Tempat Makan · area ${city.ifBlank { "sekitar Anda" }}"
+            else "📍 $query Terdekat"
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.primary))
+        })
+        card.addView(TextView(this).apply {
+            text = if (foodMode)
+                "5 tempat makan terdekat di area ${city.ifBlank { "sekitar Anda" }} · sumber Google Maps, pesan via app food delivery yang terpasang"
+            else "5 lokasi terdekat dari posisi Anda · ketuk untuk dibuka di Google Maps"
+            textSize = 10.5f
+            setTextColor(getColor(R.color.textSecondary))
+            setPadding(0, dp(2), 0, dp(6))
+        })
+
+        places.forEachIndexed { idx, p ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(6), dp(8), dp(6), dp(8))
+                background = getDrawable(R.drawable.bg_preview)
+            }
+            row.addView(TextView(this).apply {
+                text = "${idx + 1}.  "
+                textSize = 14f
+                setTextColor(getColor(R.color.primary))
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            col.addView(TextView(this).apply {
+                text = p.name
+                textSize = 13.5f
+                setTextColor(getColor(R.color.textPrimary))
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            col.addView(TextView(this).apply {
+                text = p.address
+                textSize = 10.5f
+                setTextColor(getColor(R.color.textSecondary))
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            val metaParts = mutableListOf<String>()
+            metaParts.add(
+                String.format(Locale.getDefault(), "%.1f km", p.distanceKm).replace('.', ',')
+            )
+            if (p.rating > 0) {
+                metaParts.add(
+                    "★ " + String.format(Locale.getDefault(), "%.1f", p.rating).replace('.', ',')
+                )
+                if (p.reviews > 0) metaParts.add(MarketSearch.formatCount(p.reviews) + " ulasan")
+            }
+            col.addView(TextView(this).apply {
+                text = metaParts.joinToString("  ·  ")
+                textSize = 10.5f
+                setTextColor(getColor(R.color.primary))
+            })
+            if (p.openText.isNotBlank()) {
+                col.addView(TextView(this).apply {
+                    text = p.openText
+                    textSize = 10f
+                    setTextColor(getColor(if (p.openNow) R.color.successText else R.color.errorText))
+                    setPadding(0, dp(2), 0, 0)
+                })
+            }
+
+            val chips = mutableListOf<Pair<String, () -> Unit>>()
+            val routeUrl = if (p.placeId.isNotBlank()) {
+                "https://www.google.com/maps/dir/?api=1&destination=" +
+                    URLEncoder.encode(p.name, "UTF-8") +
+                    "&destination_place_id=${p.placeId}&travelmode=driving"
+            } else {
+                "https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}&travelmode=driving"
+            }
+            chips.add("Rute" to { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(routeUrl))) })
+            if (foodMode) {
+                apps.firstOrNull()?.let { app ->
+                    chips.add("Pesan di ${app.label}" to {
+                        if (!FoodApps.open(this@NativeChatActivity, app)) {
+                            Toast.makeText(this@NativeChatActivity, "Gagal membuka ${app.label}", Toast.LENGTH_SHORT).show()
+                        }
+                    })
+                }
+            }
+            if (p.phone.isNotBlank()) {
+                val phone = p.phone.filter { it.isDigit() }
+                chips.add("Telepon" to {
+                    startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone")))
+                })
+            }
+            if (p.whatsapp.isNotBlank()) {
+                val waMsg = if (foodMode)
+                    "Halo, saya ingin bertanya menu dan harga di ${p.name}."
+                else "Halo, saya ingin bertanya jadwal kontrol gigi."
+                val waUrl = p.whatsapp + "?text=" + URLEncoder.encode(waMsg, "UTF-8")
+                chips.add("WhatsApp" to { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(waUrl))) })
+            }
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(5), 0, 0)
+            }
+            chips.forEach { (label, action) ->
+                actions.addView(TextView(this).apply {
+                    text = label
+                    textSize = 10.5f
+                    setTextColor(getColor(R.color.primary))
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    background = getDrawable(R.drawable.bg_chip)
+                    setPadding(dp(8), dp(3), dp(8), dp(3))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { marginEnd = dp(6) }
+                    setOnClickListener { action() }
+                })
+            }
+            col.addView(actions)
+            row.addView(col)
+            row.addView(TextView(this).apply {
+                text = "  ›"
+                textSize = 16f
+                setTextColor(getColor(R.color.primary))
+            })
+            row.setOnClickListener {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(p.mapsUrl)))
+            }
+            card.addView(row)
+        }
+
+        val footerActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        footerActions.addView(TextView(this).apply {
+            text = "Buka pencarian di Google Maps"
+            textSize = 11.5f
+            setTextColor(getColor(R.color.primary))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = getDrawable(R.drawable.bg_chip)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener {
+                val q = if (foodMode) "tempat makan $query di $city" else "$query terdekat"
+                val url = "https://www.google.com/maps/search/" +
+                    URLEncoder.encode(q, "UTF-8") +
+                    "/@${origin.first},${origin.second},14z"
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }
+        })
+        footerActions.addView(shareChip {
+            buildString {
+                append(if (foodMode) "🍜 Tempat makan" else "📍 Lokasi")
+                append(" terdekat — \"").append(query).append("\"\n")
+                places.forEachIndexed { idx, p ->
+                    append(idx + 1).append(". ").append(p.name)
+                        .append(" — ").append(String.format(Locale.getDefault(), "%.1f", p.distanceKm))
+                        .append(" km\n").append(p.address).append("\n")
+                }
+                append("— dikirim dari SahabatMobile AI")
+            }
+        })
+        card.addView(footerActions)
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        row.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_premium)
+            background = getDrawable(R.drawable.bg_premium_circle)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            contentDescription = getString(R.string.brand_small)
+            layoutParams = LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(8) }
+        })
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        column.addView(TextView(this).apply {
+            text = getString(R.string.brand_small)
+            textSize = 10.5f
+            letterSpacing = 0.06f
+            setTextColor(getColor(R.color.primary))
+            setPadding(dp(2), 0, 0, dp(4))
+        })
+        card.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        column.addView(card)
+        row.addView(column)
+        row.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = resources.getDimensionPixelSize(R.dimen.bubble_margin) }
+        bubbleContainer.addView(row)
+        scrollToBottom()
     }
 
     /**
@@ -2916,6 +3779,30 @@ class NativeChatActivity : AppCompatActivity() {
             java.net.URLEncoder.encode(query, "UTF-8") + "&limit=3")
     }
 
+    /** Pesan network yang aman: tidak pernah menampilkan host/IP/port ke pengguna. */
+    private fun safeNetworkMessage(): String =
+        "Koneksi internet sedang bermasalah. Cek sinyal atau Wi-Fi kamu, lalu coba lagi ya."
+
+    private fun sanitizeError(msg: String?): String {
+        val m = msg?.trim().orEmpty()
+        if (m.isEmpty()) return "Sesuatu tidak berjalan semestinya. Silakan coba lagi."
+        val technical = Regex(
+            """(?i)(failed to connect|timed?\s?out|unknown host|network is unreachable|socket|connectexception|ioexception|https?://|www\.|\d{1,3}(\.\d{1,3}){3}|port\s+\d+|(?:error|http)\s+\d{3})"""
+        )
+        return if (technical.containsMatchIn(m)) safeNetworkMessage() else m.take(200)
+    }
+
+    private fun friendlyError(e: Throwable?): String {
+        val raw = e?.message.orEmpty()
+        val network = e is java.net.SocketTimeoutException ||
+            e is java.net.ConnectException ||
+            e is java.net.UnknownHostException ||
+            e is java.io.IOException ||
+            Regex("""(?i)(failed to connect|timed?\s?out|unknown host|network is unreachable|socket|connect)""")
+                .containsMatchIn(raw)
+        return if (network) safeNetworkMessage() else sanitizeError(raw)
+    }
+
     private fun parseError(body: String?, code: Int): String {
         try {
             if (!body.isNullOrEmpty()) {
@@ -2995,6 +3882,10 @@ class NativeChatActivity : AppCompatActivity() {
         }
         R.id.action_papan -> {
             startActivity(Intent(this, PapanActivity::class.java))
+            true
+        }
+        R.id.action_watchlist -> {
+            startActivity(Intent(this, WatchlistActivity::class.java))
             true
         }
         R.id.action_clear_chat -> {

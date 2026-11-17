@@ -76,6 +76,7 @@ class ProfileActivity : AppCompatActivity() {
     private lateinit var switchDailySummary: androidx.appcompat.widget.SwitchCompat
     private lateinit var btnPickSummaryTime: Button
     private lateinit var btnTestSummary: Button
+    private lateinit var btnTestWeekly: Button
     private lateinit var btnSchedAdd: Button
     private lateinit var btnSchedManage: Button
     private lateinit var btnContactAdd: Button
@@ -248,6 +249,10 @@ class ProfileActivity : AppCompatActivity() {
             DailySummaryReceiver().testNow(this)
             Toast.makeText(this, "Ringkasan dikirim! Lihat notifikasi ☀️", Toast.LENGTH_SHORT).show()
         }
+        btnTestWeekly.setOnClickListener {
+            WeeklySummaryReceiver().testNow(this)
+            Toast.makeText(this, "Ringkasan mingguan dikirim! Lihat notifikasi 📊", Toast.LENGTH_SHORT).show()
+        }
         // Fitur #3: Pesan Terjadwal WA
         btnSchedAdd.setOnClickListener { showAddScheduledDialog() }
         btnSchedManage.setOnClickListener { showManageScheduledDialog() }
@@ -375,6 +380,7 @@ class ProfileActivity : AppCompatActivity() {
         switchDailySummary = findViewById(R.id.switchDailySummary)
         btnPickSummaryTime = findViewById(R.id.btnPickSummaryTime)
         btnTestSummary = findViewById(R.id.btnTestSummary)
+        btnTestWeekly = findViewById(R.id.btnTestWeekly)
         btnSchedAdd = findViewById(R.id.btnSchedAdd)
         btnSchedManage = findViewById(R.id.btnSchedManage)
         btnContactAdd = findViewById(R.id.btnContactAdd)
@@ -1191,7 +1197,7 @@ class ProfileActivity : AppCompatActivity() {
             }
             Toast.makeText(this, "Backup tersimpan! 💾", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "Backup gagal: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Backup gagal. Coba lagi sebentar.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1224,7 +1230,7 @@ class ProfileActivity : AppCompatActivity() {
             Toast.makeText(this, "Data dipulihkan! 📥", Toast.LENGTH_SHORT).show()
             recreate()
         } catch (e: Exception) {
-            Toast.makeText(this, "Restore gagal: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Restore gagal. Coba lagi sebentar.", Toast.LENGTH_LONG).show()
         }
     }
 

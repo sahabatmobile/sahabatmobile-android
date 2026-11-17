@@ -12,7 +12,7 @@
     <string name="thinking">Menulis…</string>
     <string name="error_generic">Koneksi gagal</string>
     <string name="error_empty">Tidak ada jawaban dari model</string>
-    <string name="error_prefix">Error: %1$s</string>
+    <string name="error_prefix">Maaf, %1$s</string>
     <string name="api_key_title">API Key SahabatMobile</string>
     <string name="api_key_desc">Masukkan API key (sk-…) dari /ai/api-keys atau /ai/plan-details. Key tersimpan hanya di perangkat Anda.</string>
     <string name="api_key_hint">sk-…</string>
@@ -325,4 +325,20 @@
     <string name="papan_tap_hint">Tap produk untuk buka di Shopee</string>
     <string name="market_tap_hint">Tap produk untuk buka di %1$s</string>
     <string name="market_tap_hint_multi">Tap produk untuk buka di app marketplace-nya</string>
+
+    <!-- Watchlist berita -->
+    <string name="watchlist_title">Watchlist Berita</string>
+    <string name="watchlist_subtitle">Asisten memantau topik ini setiap hari. Notifikasi hanya muncul kalau ada berita baru.</string>
+    <string name="watchlist_hint">Contoh: BBCA, pajak seller, IHSG</string>
+    <string name="watchlist_add">Tambah</string>
+    <string name="watchlist_empty">Belum ada topik yang dipantau.</string>
+    <string name="watchlist_remove">Hapus</string>
+    <string name="watchlist_added">Topik ditambahkan</string>
+    <string name="watchlist_dup">Topik kosong atau sudah ada</string>
+    <string name="watchlist_menu">Watchlist Berita</string>
+    <string name="watchlist_section">TOPIK DIPANTAU</string>
+    <string name="watchlist_tip">Tips: pakai kata kunci spesifik seperti “BBCA”, “pajak seller”, atau “IHSG” supaya notifikasi lebih relevan.</string>
+
+    <!-- Ringkasan mingguan -->
+    <string name="weekly_summary_test">📊 Tes Ringkasan Mingguan</string>
 </resources>

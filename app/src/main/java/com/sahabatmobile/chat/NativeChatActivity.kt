@@ -25,6 +25,7 @@ import android.speech.SpeechRecognizer
 import android.util.Base64
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
@@ -610,7 +611,7 @@ class NativeChatActivity : AppCompatActivity() {
             setPadding(dp(4), dp(8), dp(4), 0)
         })
 
-        val pager = HorizontalScrollView(this).apply {
+        val pager = SnapHorizontalScrollView(this).apply {
             isFillViewport = true
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -673,7 +674,7 @@ class NativeChatActivity : AppCompatActivity() {
 
         fun drawItems(items: List<NewsItem>) {
             listBox.removeAllViews()
-            val shown = items.take(4)
+            val shown = items.take(6)
             for (i in shown.indices step 2) {
                 val row = LinearLayout(this@NativeChatActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -696,7 +697,7 @@ class NativeChatActivity : AppCompatActivity() {
                     }
                     val thumb = ImageView(this@NativeChatActivity).apply {
                         layoutParams = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, dp(74)
+                            LinearLayout.LayoutParams.MATCH_PARENT, dp(70)
                         )
                         scaleType = ImageView.ScaleType.CENTER_CROP
                         visibility = View.GONE
@@ -706,9 +707,9 @@ class NativeChatActivity : AppCompatActivity() {
                     cell.addView(thumb)
                     cell.addView(TextView(this@NativeChatActivity).apply {
                         text = n.title
-                        textSize = 11.5f
+                        textSize = 11f
                         setTextColor(getColor(R.color.textPrimary))
-                        maxLines = 3
+                        maxLines = 2
                         ellipsize = android.text.TextUtils.TruncateAt.END
                         setPadding(0, dp(6), 0, 0)
                     })
@@ -724,33 +725,6 @@ class NativeChatActivity : AppCompatActivity() {
                         maxLines = 1
                         ellipsize = android.text.TextUtils.TruncateAt.END
                     })
-                    val actions = LinearLayout(this@NativeChatActivity).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        setPadding(0, dp(5), 0, 0)
-                    }
-                    actions.addView(TextView(this@NativeChatActivity).apply {
-                        text = "Tanya AI"
-                        textSize = 9.5f
-                        setTextColor(getColor(R.color.primary))
-                        setPadding(0, 0, dp(10), 0)
-                        setOnClickListener {
-                            pendingArticleTitle = n.title
-                            pendingArticleLink = n.realLink.ifBlank { n.link }
-                            input.setText("Jelaskan secara profesional berita ini: ${n.title}")
-                            input.setSelection(input.text.length)
-                            input.requestFocus()
-                            hideTopbar()
-                        }
-                    })
-                    actions.addView(shareChip {
-                        buildString {
-                            append("📰 ").append(n.title)
-                            if (n.source.isNotBlank()) append("\nSumber: ").append(n.source)
-                            if (n.timeAgo.isNotBlank()) append(" (").append(n.timeAgo).append(")")
-                            append("\n— dikirim dari SahabatMobile AI")
-                        }
-                    })
-                    cell.addView(actions)
                     cell.setOnClickListener {
                         Toast.makeText(
                             this@NativeChatActivity,
@@ -794,7 +768,7 @@ class NativeChatActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.IO).launch {
             val fresh = try {
-                NewsFeed.fetchHome(topic, 4)
+                NewsFeed.fetchHome(topic, 6)
             } catch (e: Exception) {
                 emptyList()
             }

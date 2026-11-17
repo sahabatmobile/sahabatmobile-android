@@ -29,6 +29,7 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -595,13 +596,32 @@ class NativeChatActivity : AppCompatActivity() {
         android.util.Log.i("SM_DASH", "dashboard card added, lines=${lines.size}")
     }
 
-    /** Berita real-time di beranda, dipersonalisasi dari profil (saham / seller / umum). */
+    /** Berita + video YouTube di beranda. Geser ke kiri untuk membuka kolom video. */
     private fun renderNewsCard(container: LinearLayout, prefs: android.content.SharedPreferences) {
         val topic = NewsFeed.detectTopic(
             prefs.getString("profile_job", null),
             prefs.getString("profile_hobby", null),
             prefs.getString("profile_goal", null)
         )
+        container.addView(TextView(this).apply {
+            text = "📰 Berita  ·  ◀ geser ke kiri ▶  Video YouTube"
+            textSize = 10f
+            setTextColor(getColor(R.color.textSecondary))
+            setPadding(dp(4), dp(8), dp(4), 0)
+        })
+
+        val pager = HorizontalScrollView(this).apply {
+            isFillViewport = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        val pages = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        pager.addView(pages)
+        container.addView(pager)
+
+        // Halaman 1: berita
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = getDrawable(R.drawable.bg_chip)
@@ -609,7 +629,7 @@ class NativeChatActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(10) }
+            )
         }
         card.addView(TextView(this).apply {
             text = "📰 Berita Terkini · " + NewsFeed.label(topic)
@@ -619,7 +639,37 @@ class NativeChatActivity : AppCompatActivity() {
         })
         val listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         card.addView(listBox)
-        container.addView(card)
+        pages.addView(card)
+
+        // Halaman 2: video YouTube
+        val ytBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getDrawable(R.drawable.bg_chip)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        ytBox.addView(TextView(this).apply {
+            text = "▶ Video YouTube · " + NewsFeed.label(topic)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.primary))
+        })
+        val ytList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        ytBox.addView(ytList)
+        pages.addView(ytBox)
+
+        pages.post {
+            val w = pager.width
+            if (w > 0) {
+                card.layoutParams.width = w
+                card.requestLayout()
+                ytBox.layoutParams.width = w
+                ytBox.requestLayout()
+            }
+        }
 
         fun drawItems(items: List<NewsItem>) {
             listBox.removeAllViews()
@@ -729,7 +779,8 @@ class NativeChatActivity : AppCompatActivity() {
             }
         }
 
-        val cached = NewsFeed.loadFromPrefs(this@NativeChatActivity, topic)
+        val homeCacheKey = "home_$topic"
+        val cached = NewsFeed.loadFromPrefs(this@NativeChatActivity, homeCacheKey)
         if (cached.isNotEmpty()) {
             drawItems(cached)
         } else {
@@ -747,9 +798,9 @@ class NativeChatActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 emptyList()
             }
-            if (fresh.isNotEmpty()) NewsFeed.saveToPrefs(this@NativeChatActivity, topic, fresh)
+            if (fresh.isNotEmpty()) NewsFeed.saveToPrefs(this@NativeChatActivity, homeCacheKey, fresh)
             withContext(Dispatchers.Main) {
-                if (card.parent !== container) return@withContext
+                if (card.parent !== pages) return@withContext
                 if (fresh.isNotEmpty()) {
                     drawItems(fresh)
                 } else if (cached.isEmpty()) {
@@ -761,6 +812,113 @@ class NativeChatActivity : AppCompatActivity() {
                         setPadding(0, dp(8), 0, 0)
                     })
                 }
+            }
+        }
+
+        val ytQuery = when (topic) {
+            "saham" -> "IHSG saham Indonesia hari ini"
+            "seller" -> "jualan online marketplace Indonesia tips"
+            else -> "berita teknologi Indonesia hari ini"
+        }
+
+        fun drawVideos(videos: List<YouTubeVideo>) {
+            ytList.removeAllViews()
+            if (videos.isEmpty()) {
+                ytList.addView(TextView(this@NativeChatActivity).apply {
+                    text = "Video belum bisa dimuat. Cek koneksi internet."
+                    textSize = 11f
+                    setTextColor(getColor(R.color.textSecondary))
+                    setPadding(0, dp(8), 0, 0)
+                })
+            } else {
+                videos.forEach { v ->
+                    val row = LinearLayout(this@NativeChatActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        background = getDrawable(R.drawable.bg_preview)
+                        setPadding(dp(8), dp(8), dp(8), dp(8))
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { topMargin = dp(6) }
+                    }
+                    val thumb = ImageView(this@NativeChatActivity).apply {
+                        layoutParams = LinearLayout.LayoutParams(dp(104), dp(70))
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        visibility = View.VISIBLE
+                        clipToOutline = true
+                        background = getDrawable(R.drawable.bg_chip)
+                    }
+                    row.addView(thumb)
+                    val txt = LinearLayout(this@NativeChatActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                            .apply { leftMargin = dp(8) }
+                    }
+                    txt.addView(TextView(this@NativeChatActivity).apply {
+                        text = v.title
+                        textSize = 11f
+                        setTextColor(getColor(R.color.textPrimary))
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    })
+                    txt.addView(TextView(this@NativeChatActivity).apply {
+                        text = listOfNotNull(
+                            v.channel.takeIf { it.isNotBlank() },
+                            v.duration.takeIf { it.isNotBlank() }
+                        ).joinToString(" · ") + if (v.channel.isNotBlank()) " · YouTube" else " YouTube"
+                        textSize = 9.5f
+                        setTextColor(getColor(R.color.textSecondary))
+                        setPadding(0, dp(3), 0, 0)
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    })
+                    row.addView(txt)
+                    row.setOnClickListener {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(v.url)))
+                        } catch (e: Exception) {
+                            Toast.makeText(this@NativeChatActivity, "Tidak bisa membuka YouTube", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    ytList.addView(row)
+                    loadNewsThumb(thumb, NewsItem(
+                        title = v.title, source = "YouTube", link = v.thumb,
+                        published = 0L, timeAgo = "", imageUrl = v.thumb
+                    ))
+                }
+            }
+            ytList.addView(TextView(this@NativeChatActivity).apply {
+                text = "Cari video di YouTube ›"
+                textSize = 10.5f
+                setTextColor(getColor(R.color.primary))
+                setPadding(0, dp(8), 0, 0)
+                setOnClickListener {
+                    try {
+                        startActivity(Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://www.youtube.com/results?search_query=" +
+                                URLEncoder.encode(ytQuery, "UTF-8"))
+                        ))
+                    } catch (e: Exception) {
+                    }
+                }
+            })
+        }
+
+        ytList.addView(TextView(this).apply {
+            text = "Memuat video…"
+            textSize = 11f
+            setTextColor(getColor(R.color.textSecondary))
+            setPadding(0, dp(8), 0, 0)
+        })
+        CoroutineScope(Dispatchers.IO).launch {
+            val vids = try {
+                YouTubeFeed.search(ytQuery, 6)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            withContext(Dispatchers.Main) {
+                if (ytBox.parent === pages) drawVideos(vids)
             }
         }
     }

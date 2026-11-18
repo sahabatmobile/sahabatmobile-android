@@ -502,14 +502,14 @@
 
                     <ImageButton
                         android:id="@+id/btnAttach"
-                        android:layout_width="46dp"
-                        android:layout_height="46dp"
-                        android:layout_marginEnd="8dp"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
                         android:background="@drawable/bg_icon_button"
                         android:contentDescription="@string/attach_image"
                         android:elevation="2dp"
-                        android:padding="12dp"
-                        android:src="@drawable/ic_image" />
+                        android:padding="7dp"
+                        android:src="@drawable/ic_plus" />
 
                     <EditText
                         android:id="@+id/input"
@@ -533,24 +533,24 @@
 
                     <ImageButton
                         android:id="@+id/btnMic"
-                        android:layout_width="46dp"
-                        android:layout_height="46dp"
-                        android:layout_marginStart="8dp"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_marginStart="4dp"
                         android:background="@drawable/bg_icon_button"
                         android:contentDescription="@string/send_voice"
                         android:elevation="2dp"
-                        android:padding="12dp"
+                        android:padding="6dp"
                         android:src="@drawable/ic_mic" />
 
                     <ImageButton
                         android:id="@+id/btnSend"
-                        android:layout_width="52dp"
-                        android:layout_height="52dp"
-                        android:layout_marginStart="8dp"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="4dp"
                         android:background="@drawable/bg_send"
                         android:contentDescription="@string/send"
-                        android:elevation="6dp"
-                        android:padding="15dp"
+                        android:elevation="4dp"
+                        android:padding="8dp"
                         android:src="@drawable/ic_send" />
                 </LinearLayout>
             </LinearLayout>

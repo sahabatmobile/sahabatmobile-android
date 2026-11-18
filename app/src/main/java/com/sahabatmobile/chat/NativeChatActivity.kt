@@ -209,6 +209,11 @@ class NativeChatActivity : AppCompatActivity() {
     private var pendingPlanParse = false
     private var pendingArticleTitle = ""
     private var pendingArticleLink = ""
+    private var inputBaseHeight = 0
+    private var inputFocused = false
+    private val sliderHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var sliderRunnable: Runnable? = null
+    private var sliderEnabled = false
     private var wideMode: Boolean = false
     private var modelsCache: List<ModelItem> = emptyList()
     private var recorder: AudioRecord? = null
@@ -324,10 +329,22 @@ class NativeChatActivity : AppCompatActivity() {
         attachAutoTopbar(scrollView)
         attachAutoTopbar(welcomeScroll)
 
-        // Mulai mengetik → topbar otomatis sembunyi agar area chat lebih luas
+        // Mulai mengetik → topbar sembunyi. Tinggi input menyesuaikan jumlah
+        // baris teks dan mengecil sendiri saat teks dihapus / dikirim.
         input.setOnFocusChangeListener { _, hasFocus ->
+            inputFocused = hasFocus
             if (hasFocus) hideTopbar()
+            resizeInputToText()
         }
+        input.post {
+            if (inputBaseHeight <= 0) inputBaseHeight = input.height
+            resizeInputToText()
+        }
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { resizeInputToText() }
+        })
 
         btnAttach.setOnClickListener { v ->
             PopupMenu(this, v).apply {
@@ -604,8 +621,17 @@ class NativeChatActivity : AppCompatActivity() {
             prefs.getString("profile_hobby", null),
             prefs.getString("profile_goal", null)
         )
+        val sections = DashboardSections.load(this)
+        val showNews = sections.first
+        val showYoutube = sections.second
+        if (!showNews && !showYoutube) return
+
         container.addView(TextView(this).apply {
-            text = "📰 Berita  ·  ◀ geser ke kiri ▶  Video YouTube"
+            text = when {
+                showNews && showYoutube -> "📰 Berita  ·  ◀ geser ke kiri ▶  Video YouTube"
+                showNews -> "📰 Berita Terkini"
+                else -> "▶ Video YouTube"
+            }
             textSize = 10f
             setTextColor(getColor(R.color.textSecondary))
             setPadding(dp(4), dp(8), dp(4), 0)
@@ -629,17 +655,21 @@ class NativeChatActivity : AppCompatActivity() {
             setPadding(dp(16), dp(14), dp(16), dp(14))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                dp(460)
             )
         }
+        val newsSources = NewsFeed.loadSources(this)
+        val ytQueries = YouTubeFeed.loadQueries(this)
         card.addView(TextView(this).apply {
-            text = "📰 Berita Terkini · " + NewsFeed.label(topic)
+            text = if (newsSources.isEmpty()) "📰 Berita Terkini · " + NewsFeed.label(topic)
+            else "📰 Berita · " + newsSources.joinToString(", ")
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(getColor(R.color.primary))
         })
         val listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         card.addView(listBox)
+        card.visibility = if (showNews) View.VISIBLE else View.GONE
         pages.addView(card)
 
         // Halaman 2: video YouTube
@@ -649,17 +679,19 @@ class NativeChatActivity : AppCompatActivity() {
             setPadding(dp(16), dp(14), dp(16), dp(14))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                dp(460)
             )
         }
         ytBox.addView(TextView(this).apply {
-            text = "▶ Video YouTube · " + NewsFeed.label(topic)
+            text = if (ytQueries.isEmpty()) "▶ Video YouTube · " + NewsFeed.label(topic)
+            else "▶ Video YouTube · " + ytQueries.joinToString(", ")
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(getColor(R.color.primary))
         })
         val ytList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         ytBox.addView(ytList)
+        ytBox.visibility = if (showYoutube) View.VISIBLE else View.GONE
         pages.addView(ytBox)
 
         pages.post {
@@ -670,6 +702,44 @@ class NativeChatActivity : AppCompatActivity() {
                 ytBox.layoutParams.width = w
                 ytBox.requestLayout()
             }
+        }
+
+        // Slider otomatis: berita <-> YouTube tiap 7,5 detik (jalan hanya jika keduanya tampil).
+        sliderRunnable?.let { sliderHandler.removeCallbacks(it) }
+        sliderRunnable = null
+        sliderEnabled = showNews && showYoutube
+        if (sliderEnabled) {
+            val slide = object : Runnable {
+                override fun run() {
+                    if (!sliderEnabled || isFinishing || isDestroyed) return
+                    val w = pager.width
+                    if (w <= 0) {
+                        sliderHandler.postDelayed(this, 7500L)
+                        return
+                    }
+                    val target = if (pager.scrollX < w / 2) w else 0
+                    ValueAnimator.ofInt(pager.scrollX, target).apply {
+                        duration = 650
+                        addUpdateListener { pager.scrollTo(it.animatedValue as Int, 0) }
+                        start()
+                    }
+                    sliderHandler.postDelayed(this, 7500L)
+                }
+            }
+            sliderRunnable = slide
+            pager.setOnTouchListener { _, event ->
+                when (event.action) {
+                    android.view.MotionEvent.ACTION_DOWN ->
+                        sliderHandler.removeCallbacks(slide)
+                    android.view.MotionEvent.ACTION_UP,
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        sliderHandler.removeCallbacks(slide)
+                        sliderHandler.postDelayed(slide, 7500L)
+                    }
+                }
+                false
+            }
+            sliderHandler.postDelayed(slide, 7500L)
         }
 
         fun drawItems(items: List<NewsItem>) {
@@ -700,7 +770,6 @@ class NativeChatActivity : AppCompatActivity() {
                             LinearLayout.LayoutParams.MATCH_PARENT, dp(70)
                         )
                         scaleType = ImageView.ScaleType.CENTER_CROP
-                        visibility = View.GONE
                         clipToOutline = true
                         background = getDrawable(R.drawable.bg_chip)
                     }
@@ -718,10 +787,11 @@ class NativeChatActivity : AppCompatActivity() {
                         n.timeAgo.takeIf { it.isNotBlank() }
                     ).joinToString(" · ")
                     cell.addView(TextView(this@NativeChatActivity).apply {
-                        text = meta
+                        text = meta.ifBlank { " " }
                         textSize = 9.5f
                         setTextColor(getColor(R.color.textSecondary))
                         setPadding(0, dp(3), 0, 0)
+                        minLines = 1
                         maxLines = 1
                         ellipsize = android.text.TextUtils.TruncateAt.END
                     })
@@ -753,11 +823,11 @@ class NativeChatActivity : AppCompatActivity() {
             }
         }
 
-        val homeCacheKey = "home_$topic"
+        val homeCacheKey = "home_${topic}_" + newsSources.joinToString("_")
         val cached = NewsFeed.loadFromPrefs(this@NativeChatActivity, homeCacheKey)
-        if (cached.isNotEmpty()) {
+        if (showNews && cached.isNotEmpty()) {
             drawItems(cached)
-        } else {
+        } else if (showNews) {
             listBox.addView(TextView(this).apply {
                 text = "Memuat berita terbaru…"
                 textSize = 11f
@@ -766,9 +836,9 @@ class NativeChatActivity : AppCompatActivity() {
             })
         }
 
-        CoroutineScope(Dispatchers.IO).launch {
+        if (showNews) CoroutineScope(Dispatchers.IO).launch {
             val fresh = try {
-                NewsFeed.fetchHome(topic, 6)
+                NewsFeed.fetchHome(topic, 6, newsSources)
             } catch (e: Exception) {
                 emptyList()
             }
@@ -851,6 +921,7 @@ class NativeChatActivity : AppCompatActivity() {
                             textSize = 9.5f
                             setTextColor(getColor(R.color.textSecondary))
                             setPadding(0, dp(3), 0, 0)
+                            minLines = 1
                             maxLines = 1
                             ellipsize = android.text.TextUtils.TruncateAt.END
                         })
@@ -870,33 +941,20 @@ class NativeChatActivity : AppCompatActivity() {
                     ytList.addView(row)
                 }
             }
-            ytList.addView(TextView(this@NativeChatActivity).apply {
-                text = "Cari video di YouTube ›"
-                textSize = 10.5f
-                setTextColor(getColor(R.color.primary))
-                setPadding(0, dp(8), 0, 0)
-                setOnClickListener {
-                    try {
-                        startActivity(Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse("https://www.youtube.com/results?search_query=" +
-                                URLEncoder.encode(ytQuery, "UTF-8"))
-                        ))
-                    } catch (e: Exception) {
-                    }
-                }
-            })
         }
 
-        ytList.addView(TextView(this).apply {
-            text = "Memuat video…"
-            textSize = 11f
-            setTextColor(getColor(R.color.textSecondary))
-            setPadding(0, dp(8), 0, 0)
-        })
-        CoroutineScope(Dispatchers.IO).launch {
+        if (showYoutube) {
+            ytList.addView(TextView(this).apply {
+                text = "Memuat video…"
+                textSize = 11f
+                setTextColor(getColor(R.color.textSecondary))
+                setPadding(0, dp(8), 0, 0)
+            })
+        }
+        if (showYoutube) CoroutineScope(Dispatchers.IO).launch {
             val vids = try {
-                YouTubeFeed.search(ytQuery, 6)
+                if (ytQueries.isNotEmpty()) YouTubeFeed.searchMany(ytQueries, 6)
+                else YouTubeFeed.search(ytQuery, 6)
             } catch (e: Exception) {
                 emptyList()
             }
@@ -1213,8 +1271,19 @@ class NativeChatActivity : AppCompatActivity() {
             else "Partner: $personaName"
     }
 
+    override fun onPause() {
+        super.onPause()
+        sliderRunnable?.let { sliderHandler.removeCallbacks(it) }
+    }
+
     override fun onResume() {
         super.onResume()
+        if (sliderEnabled) {
+            sliderRunnable?.let { r ->
+                sliderHandler.removeCallbacks(r)
+                sliderHandler.postDelayed(r, 7500L)
+            }
+        }
         assistant = try {
             JSONObject(
                 getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -1905,6 +1974,24 @@ class NativeChatActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    /** Saat mengetik input membesar jelas; saat kosong / tidak fokus mengecil sendiri. */
+    private fun resizeInputToText() {
+        val base = if (inputBaseHeight > 0) inputBaseHeight else dp(46)
+        val hasText = !input.text.isNullOrBlank()
+        val target = if (!inputFocused || !hasText) {
+            base
+        } else {
+            val line = maxOf(input.lineHeight, dp(20))
+            val padding = input.paddingTop + input.paddingBottom
+            (maxOf(3, input.lineCount) * line + padding).coerceIn(dp(108), dp(160))
+        }
+        if (input.layoutParams.height != target) {
+            val lp = input.layoutParams
+            lp.height = target
+            input.layoutParams = lp
+        }
+    }
 
     // ---------------- GAMBAR ----------------
 
@@ -2810,11 +2897,145 @@ class NativeChatActivity : AppCompatActivity() {
         Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
     }
 
+    private data class NewsShortcode(val sources: List<String>)
+
+    private fun parseNewsShortcode(text: String): NewsShortcode? {
+        if (Regex("""\[\s*(?:reset|hapus|kembali|default)\s+berita\s*\]""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(text)
+        ) return NewsShortcode(emptyList())
+        val m = Regex("""\[\s*(?:ganti|set|ubah|pilih|pakai)\s+berita\s+([^\]]+)\]""", RegexOption.IGNORE_CASE)
+            .find(text) ?: return null
+        val sources = m.groupValues[1]
+            .split(Regex("""\s*(?:dan|,|&|/|\|)\s*"""))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .take(6)
+        return if (sources.isEmpty()) null else NewsShortcode(sources)
+    }
+
+    private fun handleNewsShortcode(sc: NewsShortcode) {
+        NewsFeed.saveSources(this, sc.sources)
+        NewsFeed.clearHomeCache(this)
+        updateWelcome()
+        if (sc.sources.isEmpty()) {
+            addBubble(
+                "✅ Filter sumber berita dihapus. Beranda kembali menampilkan berita dari semua sumber.",
+                isUser = false
+            )
+        } else {
+            addBubble(buildString {
+                append("✅ Sumber berita beranda diubah:\n")
+                sc.sources.forEach { append("• ").append(it).append("\n") }
+                append("\nBuka chat baru untuk melihat berita dari sumber tersebut. ")
+                append("Ketik [reset berita] untuk kembali.")
+            }, isUser = false)
+        }
+    }
+
+    private fun parseYoutubeShortcode(text: String): List<String>? {
+        if (Regex("""\[\s*(?:reset|hapus|kembali|default)\s+youtube\s*\]""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(text)
+        ) return emptyList()
+        val m = Regex("""\[\s*(?:youtube|yt|video)\s+([^\]]+)\]""", RegexOption.IGNORE_CASE)
+            .find(text) ?: return null
+        val queries = m.groupValues[1]
+            .split(Regex("""\s*(?:,|;|\bdan\b)\s*""", RegexOption.IGNORE_CASE))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .take(5)
+        return if (queries.isEmpty()) null else queries
+    }
+
+    private fun handleYoutubeShortcode(queries: List<String>) {
+        YouTubeFeed.saveQueries(this, queries)
+        updateWelcome()
+        if (queries.isEmpty()) {
+            addBubble(
+                "✅ Topik video YouTube dihapus. Beranda kembali memakai topik sesuai profilmu.",
+                isUser = false
+            )
+        } else {
+            addBubble(buildString {
+                append("✅ Topik video YouTube diubah:\n")
+                queries.forEach { append("• ").append(it).append("\n") }
+                append("\nBuka chat baru untuk melihat videonya. Ketik [reset youtube] untuk kembali.")
+            }, isUser = false)
+        }
+    }
+
+    private data class SectionShortcode(val news: Boolean?, val youtube: Boolean?)
+
+    private fun parseSectionShortcode(text: String): SectionShortcode? {
+        var news: Boolean? = null
+        var yt: Boolean? = null
+        Regex("""\[([^\]]+)\]""").findAll(text).forEach { m ->
+            val s = m.groupValues[1].lowercase()
+            val hide = Regex("""\b(sembunyikan|sembunyi|hide|matikan|nonaktifkan)\b""").containsMatchIn(s)
+            val show = Regex("""\b(tampilkan|tampil|show|aktifkan|munculkan)\b""").containsMatchIn(s)
+            if (!hide && !show) return@forEach
+            val visible = show
+            when {
+                Regex("""\b(keduanya|semua|both)\b""").containsMatchIn(s) -> {
+                    news = visible; yt = visible
+                }
+                Regex("""\b(berita|news)\b""").containsMatchIn(s) -> news = visible
+                Regex("""\b(youtube|yt|video)\b""").containsMatchIn(s) -> yt = visible
+            }
+        }
+        return if (news == null && yt == null) null else SectionShortcode(news, yt)
+    }
+
+    private fun handleSectionShortcode(sc: SectionShortcode) {
+        val cur = DashboardSections.load(this)
+        val showNews = sc.news ?: cur.first
+        val showYt = sc.youtube ?: cur.second
+        DashboardSections.save(this, showNews, showYt)
+        updateWelcome()
+        addBubble(buildString {
+            append("✅ Tampilan beranda diubah:\n")
+            append("• Berita: ").append(if (showNews) "ditampilkan" else "disembunyikan").append("\n")
+            append("• Video YouTube: ").append(if (showYt) "ditampilkan" else "disembunyikan").append("\n")
+            append("\nBuka chat baru untuk melihat hasilnya.")
+        }, isUser = false)
+    }
+
     private fun sendMessage() {
         val text = input.text.toString().trim()
         if (!text.contains("berita ini", true)) {
             pendingArticleTitle = ""
             pendingArticleLink = ""
+        }
+        val newsShortcode = parseNewsShortcode(text)
+        if (newsShortcode != null) {
+            input.setText("")
+            clearPendingImage()
+            val immSc = getSystemService(InputMethodManager::class.java)
+            immSc.hideSoftInputFromWindow(input.windowToken, 0)
+            addBubble(text, isUser = true)
+            handleNewsShortcode(newsShortcode)
+            return
+        }
+        val ytShortcode = parseYoutubeShortcode(text)
+        if (ytShortcode != null) {
+            input.setText("")
+            clearPendingImage()
+            val immYt = getSystemService(InputMethodManager::class.java)
+            immYt.hideSoftInputFromWindow(input.windowToken, 0)
+            addBubble(text, isUser = true)
+            handleYoutubeShortcode(ytShortcode)
+            return
+        }
+        val sectionShortcode = parseSectionShortcode(text)
+        if (sectionShortcode != null) {
+            input.setText("")
+            clearPendingImage()
+            val immSec = getSystemService(InputMethodManager::class.java)
+            immSec.hideSoftInputFromWindow(input.windowToken, 0)
+            addBubble(text, isUser = true)
+            handleSectionShortcode(sectionShortcode)
+            return
         }
         val imagePath = pendingImagePath
         if (text.isEmpty() && imagePath == null) return

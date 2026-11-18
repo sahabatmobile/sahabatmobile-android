@@ -65,6 +65,35 @@ object NewsFeed {
     fun label(topic: String): String = TOPIC_LABEL[topic] ?: TOPIC_LABEL.getValue("umum")
 
     private const val NEWS_PREFS = "sm_news_cache"
+    private const val SOURCES_PREFS = "sm_news_sources"
+    private const val KEY_SOURCES = "sources"
+
+    /** Sumber berita pilihan pelanggan (shortcode [ganti berita ...]). Kosong = semua sumber. */
+    fun loadSources(context: Context): List<String> {
+        val raw = context.getSharedPreferences(SOURCES_PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_SOURCES, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveSources(context: Context, sources: List<String>) {
+        val arr = JSONArray()
+        sources.take(6).forEach { arr.put(it.trim()) }
+        context.getSharedPreferences(SOURCES_PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_SOURCES, arr.toString()).apply()
+    }
+
+    fun clearHomeCache(context: Context) {
+        val p = context.getSharedPreferences(NEWS_PREFS, Context.MODE_PRIVATE)
+        val keys = p.all.keys.filter { it.startsWith("home_") }
+        val ed = p.edit()
+        keys.forEach { ed.remove(it).remove("${it}_ts") }
+        ed.apply()
+    }
 
     fun saveToPrefs(context: Context, topic: String, items: List<NewsItem>) {
         val arr = JSONArray()
@@ -114,7 +143,30 @@ object NewsFeed {
      * asli dari artikel sumber (media:content / enclosure / img). Google News tidak
      * menyertakan gambar artikel di RSS-nya.
      */
-    fun fetchHome(topic: String, limit: Int = 4): List<NewsItem> {
+    fun fetchHome(topic: String, limit: Int = 4, sources: List<String> = emptyList()): List<NewsItem> {
+        if (sources.isNotEmpty()) {
+            val wanted = sources.map { normSource(it) }.filter { it.length >= 3 }
+            val matches: (NewsItem) -> Boolean = { n ->
+                val actual = normSource(n.source)
+                wanted.any { actual.contains(it) }
+            }
+            val q = TOPIC_QUERY[topic] ?: TOPIC_QUERY.getValue("umum")
+            val pool = try { fetchByQuery(q, limit * 8) } catch (e: Exception) { emptyList() }
+            var picked = pool.filter(matches)
+            if (picked.size < limit) {
+                val bySource = try {
+                    fetchByQuery(sources.joinToString(" OR "), limit * 8)
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                picked = (picked + bySource.filter(matches)).distinctBy { it.link }
+            }
+            // Ambil secara acak dari kumpulan yang lebih besar supaya tiap uji
+            // menampilkan kombinasi berita yang berbeda. Gambar dimuat malas
+            // oleh resolveImage() di loadNewsThumb agar berita tampil cepat.
+            return picked.distinctBy { it.link }.shuffled().take(limit)
+        }
+
         val antara = try { readRss(ANTARA) } catch (e: Exception) { emptyList() }
         val withImage = antara.filter { it.imageUrl.isNotBlank() }
         val regex = when (topic) {
@@ -247,7 +299,7 @@ object NewsFeed {
         } finally {
             conn.disconnect()
         }
-        return items.sortedByDescending { it.published }.take(20)
+        return items.sortedByDescending { it.published }.take(40)
     }
 
     /** Ambil isi artikel (dari meta description / tag article) untuk dijadikan konteks AI. */
@@ -339,15 +391,39 @@ object NewsFeed {
             .orEmpty()
             .replace("&amp;", "&")
 
-        // Google News menyimpan thumbnail di halaman artikelnya (perlu cookie CONSENT).
-        val html = get(item.link, isGoogle)
-        var img = extract(html)
-        if (img.isBlank() && isGoogle) {
-            val real = resolveLink(item.link)
-            if (real.isNotBlank() && real != item.link) img = extract(get(real, false))
+        // Google News tidak menyertakan gambar di RSS-nya. Ambil gambar dari
+        // pencarian gambar berdasarkan judul (1 request, seperti thumbnail YouTube).
+        var img = ""
+        if (isGoogle) {
+            val q = listOf(item.title.take(90), item.source.takeIf { it.isNotBlank() })
+                .filterNotNull().joinToString(" ")
+            img = searchImage(q)
+            if (img.isBlank()) img = searchImage(item.title.take(60))
+            if (img.isBlank()) {
+                val real = resolveLink(item.link)
+                if (real.isNotBlank() && real != item.link) img = extract(get(real, false))
+            }
+            if (img.isBlank()) img = extract(get(item.link, true))
+        } else {
+            img = extract(get(item.link, false))
         }
         if (img.isNotBlank()) imageCache[item.link] = img
         return img
+    }
+
+    /** Cari satu URL gambar langsung dari Bing Images (1 request). */
+    private fun searchImage(query: String): String {
+        if (query.isBlank()) return ""
+        val url = "https://www.bing.com/images/search?q=" +
+            java.net.URLEncoder.encode(query, "UTF-8") + "&form=HDRSC2"
+        val html = get(url, false)
+        if (html.isBlank()) return ""
+        val escaped = Regex("""&quot;murl&quot;:&quot;(.*?)&quot;""")
+        val plain = Regex(""""murl":"(.*?)"""")
+        val found = (escaped.findAll(html) + plain.findAll(html))
+            .map { it.groupValues[1].replace("\\/", "/").replace("&amp;", "&") }
+            .firstOrNull { it.startsWith("http") && !it.contains("gstatic.com/gnews") }
+        return found.orEmpty()
     }
 
     private fun get(urlText: String, consent: Boolean): String {
@@ -390,6 +466,31 @@ object NewsFeed {
             conn.disconnect()
         }
     }
+
+    /** Ambil URL gambar artikel (og:image / twitter:image) dari halaman penerbit. */
+    private fun fetchArticleImage(link: String): String {
+        val url = if (link.contains("news.google.com")) resolveLink(link) else link
+        if (url.isBlank()) return ""
+        val html = get(url, false)
+        if (html.isBlank()) return ""
+        val patterns = listOf(
+            Regex("""<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+property=["']twitter:image["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+content=["']([^"']+)["'][^>]+property=["']twitter:image["']""", RegexOption.IGNORE_CASE)
+        )
+        for (p in patterns) {
+            val found = p.find(html)?.groupValues?.get(1)?.trim().orEmpty()
+            if (found.startsWith("http")) return found
+        }
+        return ""
+    }
+
+    /** "Jawa Pos" / "metrotvnews.com" -> "jawapos" / "metrotvnewscom". */
+    private fun normSource(s: String): String =
+        s.lowercase(Locale.getDefault()).replace(Regex("[^a-z0-9]"), "")
 
     private fun sanitize(s: String): String = s
         .replace(Regex("&ndash;|&#8211;"), "-")

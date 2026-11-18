@@ -1,0 +1,75 @@
+SHORTCODE SAHABATMOBILE AI (Android)
+=====================================
+
+Semua shortcode diketik langsung di chat AI, diapit tanda [ ].
+Setelah shortcode diproses, buka chat baru / lihat beranda untuk melihat hasilnya.
+
+
+1. SUMBER BERITA BERANDA
+------------------------
+[ganti berita jawapos dan metro tv]
+  -> Beranda hanya menampilkan berita dari sumber tersebut.
+
+Contoh lain:
+  [ganti berita cnn indonesia, kompas.com, antara]
+  [set berita tribunnews]
+  [pilih berita detik]
+
+Kata kunci yang dikenal: ganti, set,ubah, pilih, pakai
+Pemisah sumber: koma (,) atau kata "dan"
+Maksimal 6 sumber. Pencocokan sumber tidak peduli spasi/huruf besar,
+mis. "jawapos" cocok dengan "Jawa Pos", "metro tv" dengan "MetroTVNews.com".
+
+Kembali ke semua sumber:
+  [reset berita]
+  (alias: [hapus berita], [kembali berita], [default berita])
+
+
+2. TOPIK VIDEO YOUTUBE BERANDA
+------------------------------
+[youtube game mobile legend, info movie terbaru, berita terkini/musik video]
+  -> 6 kartu video diambil dari topik-topik itu, lalu diacak.
+
+Contoh lain:
+  [youtube musik, olahraga dan teknologi]
+  [video review hp terbaru]
+  [yt resep masakan]
+
+Kata kunci yang dikenal: youtube, yt, video
+Pemisah topik: koma (,) atau kata "dan"
+Maksimal 5 topik. Tanda "/" di dalam topik dibolehkan.
+
+Kembali ke topik sesuai profil:
+  [reset youtube]
+  (alias: [hapus youtube], [kembali youtube])
+
+
+3. TAMPIL / SEMBUNYIKAN BAGIAN BERANDA
+--------------------------------------
+[sembunyikan berita]      -> kartu berita hilang
+[tampilkan berita]        -> kartu berita muncul lagi
+
+[sembunyikan youtube]     -> kartu video YouTube hilang
+[tampilkan youtube]       -> kartu video YouTube muncul lagi
+
+[sembunyikan keduanya]    -> berita dan YouTube keduanya hilang
+[tampilkan keduanya]      -> keduanya muncul lagi
+
+Alias:
+  sembunyikan | sembunyi | hide | matikan | nonaktifkan
+  tampilkan   | tampil   | show | aktifkan | munculkan
+  keduanya    | semua    | both
+
+Contoh: [hide youtube], [show berita], [sembunyikan semua]
+
+Bagian yang disembunyikan tidak mengambil data dari internet.
+
+
+CATATAN
+-------
+- Shortcode diproses lokal (tidak membutuhkan API key), langsung ada balasan
+  konfirmasi di chat.
+- Filter sumber berita, topik YouTube, dan visibilitas tersimpan permanen
+  di perangkat sampai di-reset.
+- Tombol "Tanya AI tentang ini" pada kartu berita bukan shortcode, tapi
+  otomatis mengisi prompt "Jelaskan secara profesional berita ini: ...".

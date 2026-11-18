@@ -1,5 +1,7 @@
 package com.sahabatmobile.chat
 
+import android.content.Context
+import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -15,6 +17,37 @@ data class YouTubeVideo(
 )
 
 object YouTubeFeed {
+
+    private const val PREFS = "sm_youtube_queries"
+    private const val KEY = "queries"
+
+    /** Topik video pilihan pelanggan dari shortcode [youtube ...]. */
+    fun loadQueries(context: Context): List<String> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveQueries(context: Context, queries: List<String>) {
+        val arr = JSONArray()
+        queries.take(5).forEach { arr.put(it.trim()) }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY, arr.toString()).apply()
+    }
+
+    /** Cari dari beberapa topik sekaligus, lalu acak hasilnya. */
+    fun searchMany(queries: List<String>, limit: Int = 6): List<YouTubeVideo> {
+        val all = mutableListOf<YouTubeVideo>()
+        queries.forEach { q ->
+            all.addAll(try { search(q, limit) } catch (e: Exception) { emptyList() })
+        }
+        return all.distinctBy { it.id }.shuffled().take(limit)
+    }
 
     private fun unescape(s: String): String = s
         .replace("\\u0026", "&")

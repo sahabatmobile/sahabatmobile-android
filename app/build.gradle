@@ -1,3 +1,6 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
@@ -5,8 +8,37 @@ plugins {
 
 def keystorePropsFile = rootProject.file('keystore.properties')
 def keystoreProps = new Properties()
+def EXPECTED_SHA256 = 'd3b5a5b96a3dc8b01188aa308ca127618ef80ba6b84eabb6925259bba2f8e022'
+
 if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
+    def storeFile = rootProject.file(keystoreProps['storeFile'])
+    def storePass = keystoreProps['storePassword']
+    def keyAlias = keystoreProps['keyAlias']
+    def ks = null
+    ['JKS', 'PKCS12'].each { type ->
+        if (ks == null) {
+            try {
+                def candidate = KeyStore.getInstance(type)
+                candidate.load(new FileInputStream(storeFile), storePass.toCharArray())
+                ks = candidate
+            } catch (Exception ignored) {
+            }
+        }
+    }
+    if (ks == null) {
+        throw new GradleException('Keystore tidak bisa dibaca. Jangan buat keystore baru — rilis harus lewat GitHub Actions.')
+    }
+    def cert = ks.getCertificate(keyAlias)
+    if (cert == null) {
+        throw new GradleException('Alias kunci tidak ditemukan. Jangan buat keystore baru — rilis harus lewat GitHub Actions.')
+    }
+    def hex = MessageDigest.getInstance('SHA-256').digest(cert.encoded)
+        .collect { String.format('%02x', it & 0xff) }.join()
+    if (hex != EXPECTED_SHA256) {
+        throw new GradleException("KUNCI TANDA TANGAN SALAH ($hex). Dilarang membuat keystore baru. " +
+            'Rilis hanya boleh di-build oleh GitHub Actions dengan keystore di GitHub Secrets.')
+    }
 }
 
 android {
@@ -17,8 +49,8 @@ android {
         applicationId "com.sahabatmobile.chat"
         minSdk 26
         targetSdk 36
-        versionCode 15
-        versionName "1.2.12"
+        versionCode 16
+        versionName "1.2.13"
     }
 
     signingConfigs {
@@ -64,3 +96,16 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
     implementation 'com.google.code.gson:gson:2.10.1'
 }
+
+// Release hanya boleh dibangun oleh GitHub Actions (keystore di GitHub Secrets).
+tasks.matching { it.name.startsWith('assembleRelease') || it.name.startsWith('bundleRelease') }
+    .configureEach {
+        doFirst {
+            if (!keystorePropsFile.exists()) {
+                throw new GradleException(
+                    'Build release lokal dinonaktifkan. Jangan buat keystore baru. ' +
+                    'Naikkan versi, push tag vX.Y.Z, dan biarkan GitHub Actions yang build & tanda tangani APK.'
+                )
+            }
+        }
+    }

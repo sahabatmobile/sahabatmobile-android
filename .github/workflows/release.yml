@@ -46,11 +46,6 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      - name: Verify signature
-        run: |
-          echo "Signer certificate:"
-          keytool -printcert -jarfile app/build/outputs/apk/release/app-release.apk | grep -E 'Owner:|SHA256:' | head -2
-
       - name: Prepare APK
         run: |
           VERSION=$(grep -oP 'versionName "\K[^"]+' app/build.gradle)
@@ -64,4 +59,3 @@ jobs:
           generate_release_notes: true
           body: |
             SahabatMobile AI - Android (build otomatis dari GitHub Actions).
-            Tanda tangan rilis memakai keystore bersama di GitHub Secrets — stabil di semua rilis.

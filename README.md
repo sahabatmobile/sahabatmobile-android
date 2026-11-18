@@ -2,10 +2,8 @@
 
 Aplikasi AI Android untuk pelanggan SahabatMobile. Semua fitur bekerja dengan satu API key (`/api/v1`) dan model aktif (default `google/gemini-2.5-flash`, bisa LongCat 2.5 dll).
 
-## Build rilis (PENTING)
-**Jangan pernah membuat keystore baru di komputer mana pun.** Satu-satunya kunci rilis disimpan sebagai GitHub Secrets (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) dan dipakai workflow `.github/workflows/release.yml`.
-
-Cara rilis: naikkan `versionCode`/`versionName` di `app/build.gradle`, commit/push, lalu buat tag `vX.Y.Z` dan push tag. GitHub Actions akan membuild APK bertanda tangan yang sama dan mengunggahnya ke Release. Update pelanggan langsung terpasang tanpa uninstall.
+## Build rilis
+Cara rilis: naikkan `versionCode`/`versionName` di `app/build.gradle`, commit/push, lalu buat tag `vX.Y.Z` dan push tag. Proses build dan unggah APK ke Release berjalan otomatis.
 
 Shortcode chat tercatat di `shortcode.txt`.
 
@@ -120,7 +118,6 @@ APK debug: `app/build/outputs/apk/debug/app-debug.apk`
 
 - Ganti `applicationId` di `app/build.gradle` bila perlu.
 - Isi `versionCode`/`versionName`.
-- Buat keystore signing (Build > Generate Signed Bundle/APK) untuk upload ke Play Console.
 
 ## 📂 Struktur
 

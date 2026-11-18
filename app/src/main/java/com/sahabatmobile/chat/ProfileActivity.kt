@@ -924,57 +924,85 @@ class ProfileActivity : AppCompatActivity() {
 
         lateinit var dlg: AlertDialog
 
-        fun renderList() {
-            list.removeAllViews()
-            val ordered = models.filter { showAll || isAllowed(it) } +
-                models.filter { !(showAll || isAllowed(it)) }
-            for (m in ordered) {
-                val ok = isAllowed(m)
-                val row = TextView(this)
-                row.text = if (ok) {
-                    m.name
-                } else {
-                    "${m.name}  (${getString(R.string.outside_package)})"
-                }
-                row.setTextColor(
-                    getColor(if (ok) R.color.textPrimary else R.color.textSecondary)
-                )
-                row.textSize = 15f
-                row.setPadding(dp(12), dp(14), dp(12), dp(14))
-                row.setOnClickListener {
-                    if (!ok && !showAll) {
-                        Toast.makeText(
-                            this@ProfileActivity,
-                            getString(R.string.model_blocked_msg, m.id, plan ?: "paket"),
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@setOnClickListener
-                    }
-                    prefs.edit()
-                        .putString(NativeChatActivity.KEY_MODEL, m.id)
-                        .putBoolean(NativeChatActivity.KEY_MODEL_SET, true)
-                        .apply()
-                    txtCurrentModel.text = getString(R.string.model_none_selected, m.name)
+        // Paket user: tampilkan hanya model yang ditanggung paket. Model lain
+        // dipindahkan ke bagian lipat supaya tidak menyesatkan pelanggan.
+        if (showAll) {
+            showAll = false
+            prefs.edit().putBoolean(NativeChatActivity.KEY_SHOW_ALL, false).apply()
+        }
+        var showOutside = false
+
+        fun addRow(m: SettingsApi.Model, ok: Boolean) {
+            val row = TextView(this)
+            row.text = if (ok) m.name else "${m.name}  (${getString(R.string.outside_package)})"
+            row.setTextColor(getColor(if (ok) R.color.textPrimary else R.color.textSecondary))
+            row.textSize = 15f
+            row.setPadding(dp(12), dp(14), dp(12), dp(14))
+            row.setOnClickListener {
+                if (!ok) {
                     Toast.makeText(
                         this@ProfileActivity,
-                        getString(R.string.model_switched, m.name),
-                        Toast.LENGTH_SHORT
+                        getString(R.string.model_blocked_msg, m.id, plan ?: "paket"),
+                        Toast.LENGTH_LONG
                     ).show()
-                    dlg.dismiss()
+                    return@setOnClickListener
                 }
-                list.addView(row)
+                prefs.edit()
+                    .putString(NativeChatActivity.KEY_MODEL, m.id)
+                    .putBoolean(NativeChatActivity.KEY_MODEL_SET, true)
+                    .apply()
+                txtCurrentModel.text = getString(R.string.model_none_selected, m.name)
+                Toast.makeText(
+                    this@ProfileActivity,
+                    getString(R.string.model_switched, m.name),
+                    Toast.LENGTH_SHORT
+                ).show()
+                dlg.dismiss()
+            }
+            list.addView(row)
+        }
+
+        fun renderList() {
+            list.removeAllViews()
+            val inside = models.filter { isAllowed(it) }
+            val outside = models.filter { !isAllowed(it) }
+            inside.forEach { addRow(it, true) }
+            if (outside.isNotEmpty()) {
+                val header = TextView(this).apply {
+                    text = "Model lain — butuh paket/top-up (${outside.size})  ${if (showOutside) "▴" else "▾"}"
+                    setTextColor(getColor(R.color.textSecondary))
+                    textSize = 12.5f
+                    setPadding(dp(12), dp(14), dp(12), dp(10))
+                    setOnClickListener {
+                        showOutside = !showOutside
+                        renderList()
+                    }
+                }
+                list.addView(header)
+                if (showOutside) outside.forEach { addRow(it, false) }
             }
         }
 
-        val toggle = CheckBox(this)
-        toggle.text = getString(R.string.model_show_all)
-        toggle.isChecked = showAll
-        toggle.setOnCheckedChangeListener { _, checked ->
-            showAll = checked
-            prefs.edit().putBoolean(NativeChatActivity.KEY_SHOW_ALL, checked).apply()
-            renderList()
+        if (!plan.isNullOrEmpty() && !allowed.isNullOrEmpty()) {
+            val seeOther = TextView(this).apply {
+                text = "Lihat paket lain ›"
+                setTextColor(getColor(R.color.primary))
+                textSize = 13f
+                setPadding(dp(12), dp(6), dp(12), dp(12))
+                setOnClickListener {
+                    try {
+                        startActivity(
+                            android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://www.sahabatmobile.com/ai/packages")
+                            )
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+            box.addView(seeOther)
         }
-        box.addView(toggle)
         box.addView(list)
 
         renderList()

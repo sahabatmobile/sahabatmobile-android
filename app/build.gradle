@@ -27,17 +27,16 @@ if (keystorePropsFile.exists()) {
         }
     }
     if (ks == null) {
-        throw new GradleException('Keystore tidak bisa dibaca. Jangan buat keystore baru — rilis harus lewat GitHub Actions.')
+        throw new GradleException('Keystore tidak bisa dibaca. Hubungi maintainer rilis.')
     }
     def cert = ks.getCertificate(keyAlias)
     if (cert == null) {
-        throw new GradleException('Alias kunci tidak ditemukan. Jangan buat keystore baru — rilis harus lewat GitHub Actions.')
+        throw new GradleException('Alias kunci tidak ditemukan. Hubungi maintainer rilis.')
     }
     def hex = MessageDigest.getInstance('SHA-256').digest(cert.encoded)
         .collect { String.format('%02x', it & 0xff) }.join()
     if (hex != EXPECTED_SHA256) {
-        throw new GradleException("KUNCI TANDA TANGAN SALAH ($hex). Dilarang membuat keystore baru. " +
-            'Rilis hanya boleh di-build oleh GitHub Actions dengan keystore di GitHub Secrets.')
+        throw new GradleException("Kunci rilis tidak cocok ($hex). Hubungi maintainer rilis.")
     }
 }
 
@@ -49,8 +48,8 @@ android {
         applicationId "com.sahabatmobile.chat"
         minSdk 26
         targetSdk 36
-        versionCode 16
-        versionName "1.2.13"
+        versionCode 17
+        versionName "1.2.14"
     }
 
     signingConfigs {
@@ -97,14 +96,13 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.10.1'
 }
 
-// Release hanya boleh dibangun oleh GitHub Actions (keystore di GitHub Secrets).
+// Build release dijalankan oleh pipeline rilis resmi.
 tasks.matching { it.name.startsWith('assembleRelease') || it.name.startsWith('bundleRelease') }
     .configureEach {
         doFirst {
             if (!keystorePropsFile.exists()) {
                 throw new GradleException(
-                    'Build release lokal dinonaktifkan. Jangan buat keystore baru. ' +
-                    'Naikkan versi, push tag vX.Y.Z, dan biarkan GitHub Actions yang build & tanda tangani APK.'
+                    'Build release lokal dinonaktifkan. Naikkan versi lalu push tag vX.Y.Z.'
                 )
             }
         }

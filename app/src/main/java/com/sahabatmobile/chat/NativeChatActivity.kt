@@ -445,6 +445,8 @@ class NativeChatActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
 
+        handleConnectIntent(intent)
+
         findViewById<Button>(R.id.btnOnboardKey).setOnClickListener { askApiKey() }
         findViewById<Button>(R.id.btnOnboardWeb).setOnClickListener {
             startActivity(Intent(this, MainActivity::class.java))
@@ -2522,6 +2524,19 @@ class NativeChatActivity : AppCompatActivity() {
                 applyPlanRestriction()
             }
         }
+    }
+
+    /** Pasang API key otomatis dari deep link website: sahabatmobile://connect?key=... */
+    private fun handleConnectIntent(i: Intent?) {
+        val data = i?.data ?: return
+        if (data.scheme != "sahabatmobile" || data.host != "connect") return
+        val key = data.getQueryParameter("key")?.trim().orEmpty()
+        if (key.isBlank()) return
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_API, key).apply()
+        apiKey = key
+        i.data = null
+        Toast.makeText(this, "API key berhasil dipasang. Mendeteksi paket...", Toast.LENGTH_LONG).show()
+        detectAccess()
     }
 
     /** Deteksi paket dari akun (server) → daftar model yang ditanggung paket. */

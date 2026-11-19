@@ -861,6 +861,7 @@ class ProfileActivity : AppCompatActivity() {
         btnPickModel.text = getString(R.string.loading_models)
         CoroutineScope(Dispatchers.IO).launch {
             val models = SettingsApi.fetchModels(key)
+            val saldo = SettingsApi.fetchBalanceRupiah(key)
             withContext(Dispatchers.Main) {
                 btnPickModel.isEnabled = true
                 btnPickModel.text = getString(R.string.change_model)
@@ -872,7 +873,7 @@ class ProfileActivity : AppCompatActivity() {
                     ).show()
                     return@withContext
                 }
-                showModelDialog(models)
+                showModelDialog(models, saldo)
             }
         }
     }
@@ -881,17 +882,24 @@ class ProfileActivity : AppCompatActivity() {
      * SATU-SATUNYA tempat memilih model AI di aplikasi ini.
      * Menu chat & pil model hanya menampilkan model aktif dan mengarahkan ke sini.
      */
-    private fun showModelDialog(models: List<SettingsApi.Model>) {
+    private fun showModelDialog(models: List<SettingsApi.Model>, saldoRupiah: Long) {
         val prefs = getSharedPreferences(NativeChatActivity.PREFS, MODE_PRIVATE)
         val allowed = readAllowedModels()
         val isPayg = prefs.getBoolean(NativeChatActivity.KEY_PAYG, false)
         val plan = prefs.getString(NativeChatActivity.KEY_PLAN_NAME, null)?.ifEmpty { null }
         var showAll = prefs.getBoolean(NativeChatActivity.KEY_SHOW_ALL, false)
 
+        fun isExclusive(m: SettingsApi.Model): Boolean {
+            val id = m.id.lowercase()
+            return id.startsWith("mimo") || id.startsWith("minimax")
+        }
+
         fun isAllowed(m: SettingsApi.Model): Boolean {
+            val id = m.id.lowercase()
+            // Model eksklusif MiMo/MiniMax hanya untuk pelanggan paket.
+            if (isPayg && isExclusive(m)) return false
             if (allowed.isNullOrEmpty()) return true
             if (m.inPlan == true) return true
-            val id = m.id.lowercase()
             return allowed.any { e ->
                 val entry = e.lowercase()
                 id == entry || id.contains(entry) || entry.contains(id)
@@ -933,18 +941,53 @@ class ProfileActivity : AppCompatActivity() {
         var showOutside = false
 
         fun addRow(m: SettingsApi.Model, ok: Boolean) {
+            val exclusiveForPayg = !ok && isPayg && isExclusive(m)
             val row = TextView(this)
-            row.text = if (ok) m.name else "${m.name}  (${getString(R.string.outside_package)})"
+            row.text = when {
+                exclusiveForPayg -> "${m.name}  (khusus paket)"
+                ok -> m.name
+                else -> "${m.name}  (bayar saldo)"
+            }
             row.setTextColor(getColor(if (ok) R.color.textPrimary else R.color.textSecondary))
             row.textSize = 15f
             row.setPadding(dp(12), dp(14), dp(12), dp(14))
             row.setOnClickListener {
-                if (!ok) {
+                if (exclusiveForPayg) {
                     Toast.makeText(
                         this@ProfileActivity,
-                        getString(R.string.model_blocked_msg, m.id, plan ?: "paket"),
+                        "Model MiMo/MiniMax khusus pelanggan paket. Ambil paket untuk memakainya.",
                         Toast.LENGTH_LONG
                     ).show()
+                    return@setOnClickListener
+                }
+                if (!ok) {
+                    val saldoText = if (saldoRupiah > 0) {
+                        "Saldo kamu saat ini: Rp$saldoRupiah."
+                    } else {
+                        "Saldo kamu kosong. Isi saldo dulu supaya permintaan bisa diproses."
+                    }
+                    AlertDialog.Builder(this@ProfileActivity)
+                        .setTitle("Model di luar paket")
+                        .setMessage(
+                            "\"${m.name}\" tidak termasuk paket ${plan ?: "kamu"}. " +
+                                "Pemakaian akan dikenakan saldo wallet (tarif PAYG, lebih mahal). " +
+                                saldoText
+                        )
+                        .setPositiveButton("Lanjutkan") { _, _ ->
+                            prefs.edit()
+                                .putString(NativeChatActivity.KEY_MODEL, m.id)
+                                .putBoolean(NativeChatActivity.KEY_MODEL_SET, true)
+                                .apply()
+                            txtCurrentModel.text = getString(R.string.model_none_selected, m.name)
+                            Toast.makeText(
+                                this@ProfileActivity,
+                                getString(R.string.model_switched, m.name),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            dlg.dismiss()
+                        }
+                        .setNegativeButton("Batal", null)
+                        .show()
                     return@setOnClickListener
                 }
                 prefs.edit()
@@ -969,7 +1012,7 @@ class ProfileActivity : AppCompatActivity() {
             inside.forEach { addRow(it, true) }
             if (outside.isNotEmpty()) {
                 val header = TextView(this).apply {
-                    text = "Model lain — butuh paket/top-up (${outside.size})  ${if (showOutside) "▴" else "▾"}"
+                    text = "Model lain — bayar saldo / butuh paket (${outside.size})  ${if (showOutside) "▴" else "▾"}"
                     setTextColor(getColor(R.color.textSecondary))
                     textSize = 12.5f
                     setPadding(dp(12), dp(14), dp(12), dp(10))

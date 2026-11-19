@@ -122,4 +122,25 @@ object SettingsApi {
             "unknown"
         }
     }
+
+    /** Saldo wallet dalam rupiah — dipakai untuk menjelaskan biaya model di luar paket. */
+    fun fetchBalanceRupiah(apiKey: String): Long {
+        if (apiKey.isBlank()) return 0L
+        return try {
+            val conn = URL("$API_BASE/me/status").openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("Authorization", "Bearer $apiKey")
+            conn.connectTimeout = 12000
+            conn.readTimeout = 15000
+            if (conn.responseCode != 200) {
+                conn.disconnect()
+                return 0L
+            }
+            val body = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+            JSONObject(body).optLong("saldo_rupiah", 0L)
+        } catch (_: Exception) {
+            0L
+        }
+    }
 }

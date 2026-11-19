@@ -3134,6 +3134,7 @@ class NativeChatActivity : AppCompatActivity() {
                     "Jangan jawab hanya dengan keyword/kata kunci, dan jangan pernah mengatakan kartu produk sudah tampil bila kamu belum benar-benar memanggil tool-nya. " +
                     "Jika pengguna mencari tempat atau lokasi terdekat (dokter gigi, klinik, rumah sakit, apotek, dan sejenisnya), SELALU gunakan tool nearby_places agar 5 lokasi terdekat ditampilkan otomatis sebagai kartu lokasi di chat, lengkap dengan alamat, jarak, rating, dan tombol membuka Google Maps. " +
                     "Jangan menebak alamat atau lokasi dari pengetahuanmu sendiri untuk permintaan 'terdekat' — pakai tool-nya. " +
+                    "Jika pengguna hanya bertanya lanjutan tentang tempat yang sudah ditampilkan (misalnya 'tips bertanya ke dokter tersebut', 'bagaimana cara konsultasi', atau pertanyaan serupa), jawab langsung dengan teks biasa dan JANGAN memanggil nearby_places lagi. " +
                     "Jawaban kamu selalu berupa teks biasa - jangan sisipkan gambar, tabel besar, atau tautan markdown. Gambar produk hanya sudah ditampilkan otomatis di kartu hasil pencarian."
                 if (systemText.isNotEmpty() && !systemText.contains("pencarian web", ignoreCase = true)) {
                     systemText = systemText + "\n\n" + webSearchInstruction
@@ -3205,7 +3206,13 @@ class NativeChatActivity : AppCompatActivity() {
                     .containsMatchIn(lastUserText)
                 val isInfoQuery = Regex("(?i)\\b(berita|informasi|artikel|resep|jadwal|lokasi|cuaca|sejarah|makna|pengertian|tutorial|lowongan|harga emas|saham)\\b")
                     .containsMatchIn(lastUserText)
-                val forceNearby = Regex("(?i)(dokter gigi|klinik gigi|klinik|dokter|rumah sakit|\\brs\\b|apotek|puskesmas|terdekat|dekat sini|sekitar sini|nearby|near me)").containsMatchIn(lastUserText)
+                val placesNoun = Regex("(?i)(dokter gigi|klinik gigi|klinik|dokter|rumah sakit|\\brs\\b|apotek|puskesmas|pom bensin|masjid|hotel|restoran|sekolah|bank)")
+                    .containsMatchIn(lastUserText)
+                val nearbyIntent = Regex("(?i)\\b(terdekat|dekat|sekitar|nearby|near|cari|carikan|cariin|tampilkan|tunjukkan|daftar|list|rekomendasi|dimana)\\b")
+                    .containsMatchIn(lastUserText)
+                val followUpAsk = Regex("(?i)\\b(tips|saran|cara|bagaimana|gimana|kenapa|mengapa|sebaiknya|harus|tanya|tanyakan|konsultasi|pertanyaan|langkah|obat|minum|biaya|harga|jadwal)\\b")
+                    .containsMatchIn(lastUserText)
+                val forceNearby = nearbyIntent && placesNoun && !followUpAsk
                 val forceFood = !forceNearby && Regex("(?i)(go ?food|grab ?food|shopeefood|foodpanda|pesan makan|makanan|makan|kuliner|restoran|warung|lapar|food delivery|delivery|ayam|kopi|seafood|bakso|pizza|burger)").containsMatchIn(lastUserText)
                 val isArticleAsk = lastUserText.contains("berita ini", true)
                 val forceMarket = !forceNearby && !forceFood && !isArticleAsk && ((hasSearchVerb && !isInfoQuery) ||

@@ -3135,7 +3135,8 @@ class NativeChatActivity : AppCompatActivity() {
                     "Jika pengguna mencari tempat atau lokasi terdekat (dokter gigi, klinik, rumah sakit, apotek, dan sejenisnya), SELALU gunakan tool nearby_places agar 5 lokasi terdekat ditampilkan otomatis sebagai kartu lokasi di chat, lengkap dengan alamat, jarak, rating, dan tombol membuka Google Maps. " +
                     "Jangan menebak alamat atau lokasi dari pengetahuanmu sendiri untuk permintaan 'terdekat' — pakai tool-nya. " +
                     "Jika pengguna hanya bertanya lanjutan tentang tempat yang sudah ditampilkan (misalnya 'tips bertanya ke dokter tersebut', 'bagaimana cara konsultasi', atau pertanyaan serupa), jawab langsung dengan teks biasa dan JANGAN memanggil nearby_places lagi. " +
-                    "Jawaban kamu selalu berupa teks biasa - jangan sisipkan gambar, tabel besar, atau tautan markdown. Gambar produk hanya sudah ditampilkan otomatis di kartu hasil pencarian."
+                    "Jawaban kamu selalu berupa teks biasa - jangan sisipkan gambar, tabel besar, atau tautan markdown. Gambar produk hanya sudah ditampilkan otomatis di kartu hasil pencarian. " +
+                    "JANGAN gunakan market_search untuk pertanyaan berupa solusi, strategi, arah bisnis, balasan komunikasi, copywriting, caption, atau rekomendasi kata/kalimat — jawab langsung dengan teks. Kata 'market' atau 'pasar' dalam konteks arah bisnis BUKAN permintaan belanja produk."
                 if (systemText.isNotEmpty() && !systemText.contains("pencarian web", ignoreCase = true)) {
                     systemText = systemText + "\n\n" + webSearchInstruction
                 }
@@ -3215,10 +3216,11 @@ class NativeChatActivity : AppCompatActivity() {
                 val forceNearby = nearbyIntent && placesNoun && !followUpAsk
                 val forceFood = !forceNearby && Regex("(?i)(go ?food|grab ?food|shopeefood|foodpanda|pesan makan|makanan|makan|kuliner|restoran|warung|lapar|food delivery|delivery|ayam|kopi|seafood|bakso|pizza|burger)").containsMatchIn(lastUserText)
                 val isArticleAsk = lastUserText.contains("berita ini", true)
-                val forceMarket = !forceNearby && !forceFood && !isArticleAsk && ((hasSearchVerb && !isInfoQuery) ||
+                val isAdviceAsk = Regex("(?i)\\b(solusi|strategi|arah|balasan|komunikasi|pendekatan|copywriting|caption|konten|ucapan|kalimat|pesan|email|cs|customer service|follow ?up|negosiasi|pitch|judul|ide|saran|tips|bisnis|marketing)\\b").containsMatchIn(lastUserText)
+                val forceMarket = !forceNearby && !forceFood && !isArticleAsk && !isAdviceAsk && ((hasSearchVerb && !isInfoQuery) ||
                         Regex("(?i)shopee|tokopedia|blibli|lazada|marketplace|jaket|koko|baju|sepatu|celana|kemeja|hoodie|tshirt|pakaian|kaos|polo|tas|dompet|power|charger|iphone|samsung|tablet|laptop|earphone|headphone|speaker|celengan|mantel|sandal|sendal|helm|kacamata|parfum|gamis|hijab|mukena|sarung|peci|topi|koper|kamera|mouse|keyboard|komputer|monitor|kulkas|blender|kompor|panci|sepeda|baterai|kabel|flashdisk").containsMatchIn(lastUserText))
                 val forceWeb = !forceNearby && !forceFood && !forceMarket &&
-                        (isArticleAsk || Regex("(?i)(berita|kabar|terkini|terbaru|hari ini|update|ihsg|saham|pasar|kurs|inflasi|suku bunga|info harga)").containsMatchIn(lastUserText))
+                        (isArticleAsk || (!isAdviceAsk && Regex("(?i)(berita|kabar|terkini|terbaru|hari ini|update|ihsg|saham|pasar|kurs|inflasi|suku bunga|info harga)").containsMatchIn(lastUserText)))
                 var activeTools = toolsArray
                 var webSearchDone = false
                 if (forceWeb) {
@@ -3552,8 +3554,7 @@ class NativeChatActivity : AppCompatActivity() {
                             }
                             // Pencarian Shopee sukses → tampilkan kartu saja (tanpa bubble teks tambahan)
                             if ((shopeeFound || nearbyFound) && !hasOtherTool && fnAllCards(assembled)) {
-                                cardOnly = true
-                                sb.setLength(0)
+                                cardOnly = sb.isEmpty()
                                 break
                             }
                             val assistantMsg = JSONObject()
@@ -3599,9 +3600,9 @@ class NativeChatActivity : AppCompatActivity() {
                 }
 
                 // Paksa pencarian produk bila intent produk terdeteksi tetapi model tidak memanggil tool
-                if (forceMarket && !cardRendered && error == null) {
+                if (forceMarket && !isAdviceAsk && !cardRendered && error == null) {
                     val kwDirect = lastUserText
-                        .replace(Regex("(?i)\\b(cari|carikan|beli|belikan|tolong|mohon|shopee|tokopedia|blibli|lazada|marketplace|di|yang|untuk|dong|ya|please|search|find|produk|barang)\\b"), " ")
+                        .replace(Regex("(?i)\\b(cari|carikan|beli|belikan|tolong|mohon|shopee|tokopedia|blibli|lazada|marketplace|di|yang|untuk|dong|ya|please|search|find|produk|barang|solusi|strategi|arah|balasan|komunikasi|copywriting)\\b"), " ")
                         .replace(Regex("\\s+"), " ")
                         .trim()
                         .ifEmpty { lastUserText }
@@ -3614,8 +3615,7 @@ class NativeChatActivity : AppCompatActivity() {
                     }
                     if (productsDirect.isNotEmpty()) {
                         cardRendered = true
-                        cardOnly = true
-                        sb.setLength(0)
+                        cardOnly = sb.isEmpty()
                         // Langsung simpan ke Papan Hasil AI (tanpa perlu tap tombol).
                         val pinnedDirect = try {
                             PapanStore.pin(this@NativeChatActivity, productsDirect.toPapanCards(kwDirect))
@@ -3645,9 +3645,8 @@ class NativeChatActivity : AppCompatActivity() {
                     }
                     if (foodPlaces.isNotEmpty()) {
                         cardRendered = true
-                        cardOnly = true
+                        cardOnly = sb.isEmpty()
                         error = null
-                        sb.setLength(0)
                         val apps = FoodApps.installed(this@NativeChatActivity)
                         val city = cityFromAddress(foodPlaces.first().address)
                         val mdFood = StringBuilder()
@@ -3683,9 +3682,8 @@ class NativeChatActivity : AppCompatActivity() {
                     }
                     if (placesDirect.isNotEmpty()) {
                         cardRendered = true
-                        cardOnly = true
+                        cardOnly = sb.isEmpty()
                         error = null
-                        sb.setLength(0)
                         val mdDirect = StringBuilder().append("📍 **").append(qDirect).append(" Terdekat**\n")
                         placesDirect.forEachIndexed { idx, p ->
                             mdDirect.append(idx + 1).append(". ").append(p.name)
@@ -3724,10 +3722,14 @@ class NativeChatActivity : AppCompatActivity() {
                     }
                     updateWelcome()
                 } else if (cardOnly) {
-                    // Hanya kartu produk yang ditampilkan → sembunyikan bubble teks kosong
-                    aiBubble.visibility = View.GONE
-                    aiBubble.parent?.let { parent ->
-                        (parent.parent as? View)?.visibility = View.GONE
+                    if (sb.isNotEmpty()) {
+                        applyMarkdown(aiBubble, sb.toString())
+                        history.put(JSONObject().put("role", "assistant").put("content", sb.toString()))
+                    } else {
+                        aiBubble.visibility = View.GONE
+                        aiBubble.parent?.let { parent ->
+                            (parent.parent as? View)?.visibility = View.GONE
+                        }
                     }
                     shopeeHistoryMsg?.let { history.put(it) }
                     saveCurrentSession()
